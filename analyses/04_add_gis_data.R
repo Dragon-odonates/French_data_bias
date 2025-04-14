@@ -16,7 +16,7 @@ library(here)
 
 read_folder <- here("data", "02_clean")
 data_folder <- here("data", "gis")
-extdata_folder <- here("~/OneDrive/Documents/Data/")
+extdata_folder <- here("~/OneDrive/2025_internship_Thomas_MICHEL-PALUDAN/data/gis")
 
 ## Read data -----
 df_steli <- readRDS(file.path(read_folder, "steli.rds"))
@@ -35,14 +35,14 @@ shp <- st_as_sf(coo, coords = coocol, crs = 4326)
 id_coo <- paste(coo[,1], coo[,2], sep="_")
 shp$id_coo <- id_coo
 
-# Export shapefile, if needed 
+# Export shapefile, if needed
 # st_write(shp, here(data_folder,"shape_all.shp"), append=FALSE)
 
 
 ## Get and extract GIS data --------------------
 
 # administrative regions -----------
-gadm <- vect(here(extdata_folder,"gadm", "gadm41_FRA_2.shp"))
+gadm <- vect(here(extdata_folder, "gadm", "gadm41_FRA_2.shp"))
 gadm_points <- extract(gadm, vect(shp)) # take some time to compute ...
 # table(gadm_points$NAME_1, useNA="ifany")
 
@@ -56,7 +56,7 @@ glo30 <- glo30[order(glo30$FID),]
 
 
 # Bioclimatic regions ---------
-# Metzger et al. 2013 https://doi.org/10.1111/geb.12022 
+# Metzger et al. 2013 https://doi.org/10.1111/geb.12022
 gens <-  rast(here(data_folder, "eu_croped_gens_v3.tif"))
 meta_gens <- read.csv(here(data_folder, "GEnS_v3_classification.csv"))
 gens_points <- extract(gens, shp)
@@ -98,3 +98,5 @@ gis_info <- data.frame(
 )
 
 write.csv(gis_info, here(read_folder, "gis_info.csv"))
+
+gis_info <- read.csv(here(read_folder, "gis_info.csv"))

@@ -22,6 +22,7 @@ library(dplyr)
 library(sf)
 
 read_folder <- here("data/03_grid")
+fig_folder <- here("figures/03_data_summary")
 ```
 
 ## Prepare data
@@ -69,20 +70,49 @@ dat[, .N, by = source] |>
   datatable()
 
 # Number of species
-dat[, .N, by = scientificName][order(-N), ] |> 
-  datatable()
+nsp <- dat[, .N, by = scientificName][order(-N), ]
+
+nsp |> datatable()
 ```
 
+## Species barplot
+
+```{r, fig.height=6, fig.width=8}
+ggplot(nsp) +
+  geom_col(aes(x = N, 
+               y = reorder(scientificName, N)), fill = "darkorange") +
+  scale_x_continuous(expand = c(0,0)) +
+  xlab("Number of occurrences") +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+
+ggsave(file.path(fig_folder, "spp_barplot.png"),
+       width = 8, height = 6, dpi = 300)
+```
 
 ### Data evolution
 
-```{r}
+```{r, fig.width=6, fig.height=3}
 datN <- dat[, .N, by = list(source, year(dat$eventDate))]
 
 ggplot(datN) +
   geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  ylab("Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
   facet_wrap(facets = vars(source), 
-             scales = "free")
+             scales = "free") +
+  theme(axis.title.x = element_blank())
+
+ggsave(file.path(fig_folder, "dat_evolution.png"),
+       width = 6, height = 3, dpi = 300)
 ```
 
 ### Map
@@ -96,19 +126,19 @@ st_crs(dat_sf) <- 4326
 dat_3035 <- st_transform(dat_sf, crs = 3035)
 ```
 
-Plot raw data points:
-
 ```{r}
 # Get French map
 fr <- ne_countries(scale = 50, 
                    country = "France")
 fr_3035 <- st_transform(fr, 3035)
-```
 
-```{r}
 # Data bounding box
 bbox <- st_bbox(dat_3035)
+```
 
+Plot raw data points:
+
+```{r}
 ggplot() +
   geom_sf(data = fr_3035) +
   xlim(bbox$xmin, bbox$xmax) +
@@ -129,11 +159,12 @@ grid <- readRDS(file.path(read_folder,
 ```{r}
 # Sumarize with grid
 nobs <- st_drop_geometry(dat) |>
-  group_by(id_10000, source) |>
+  group_by(id_10000) |>
   summarize(nobs = n(), .groups = "drop")
 
 nobs_grid <- grid |>
   right_join(nobs, by = c("id" = "id_10000"))
+nobs_grid <- st_intersection(nobs_grid, fr_3035)
 ```
 
 ```{r}
@@ -142,12 +173,18 @@ ggplot() +
   geom_sf(data = fr_3035) +
   geom_sf(data = nobs_grid, aes(fill = nobs),
           color = "transparent") +
-  facet_grid(cols = vars(source)) +
+  # facet_grid(cols = vars(source)) +
   xlim(bbox$xmin, bbox$xmax) +
   ylim(bbox$ymin, bbox$ymax) +
   scale_fill_viridis_c(na.value = "lightgrey",
-                       trans = "log") +
-  theme(legend.position = "bottom",
-        legend.key.size = unit(1.5, 'cm'))
+                       trans = "log",
+                       breaks = c(1, 20, 400, 8000),
+                       name = "Occurrences") +
+  theme_void(base_size = 30) + 
+  theme(legend.position = "left",
+        legend.key.height = unit(1, "cm"))
+
+ggsave(file.path(fig_folder, "map.png"),
+       width = 8, height = 6, dpi = 300)
 ```
 
