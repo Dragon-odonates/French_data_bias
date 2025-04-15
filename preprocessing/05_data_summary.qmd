@@ -1,5 +1,5 @@
 ---
-title: "Summarize data"
+title: "données résumées"
 format:
   html:
     code-fold: true
@@ -25,7 +25,6 @@ read_folder <- here("data/03_grid")
 fig_folder <- here("figures/preprocessing")
 ```
 
-
 ## Load data
 
 ```{r}
@@ -35,33 +34,32 @@ dim(dat)
 str(dat)
 ```
 
-
-Variable| Description
-:-----|:----------
-scientificName| latin name of the observed taxa
-family| family name of the observed taxa
-occurrenceID| ID of the occurence event (unique ID of the row)
-eventDate| date of the observation
-recordedBy| name of the observer
-decimalLongitude| longitude in decimal degree (WGS84)
-decimalLatitude| latitude in decimal degree (WGS84)
-municipality| municipality of the observation
-verbatimName| full name of the species, including reference
-genus| genus of the taxa   
-taxonRank| rank of the taxa
-taxonID| ID of the taxa (from GBIF)              
-id_1000| ID of the grid cell at 1km resolution
-id_5000| ID of the grid cell at 5km resolution
-id_10000| ID of the grid cell at 10km resolution
-source| database of origin (steli or atlas)                
-x_ETRS89_LAEA| longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection
-y_ETRS89_LAEA| latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection
-region| administrative region of the observation
-departement| administrative department of the observation
-elevation_m| elevation (in m), from [Copernicus GLO-30 dataset](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM)
-GEnS_v3_bioclim| bioclimatic region, from [Metzger et al. 2013](https://doi.org/10.1111/geb.12022)
-popdensity_hab_per_km2| population density in 2006 from [EEA Geostat data](ttps://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761)
-CLC2018_landcover| [Corine land cover class](https://land.copernicus.eu/en/products/corine-land-cover/clc2018) of 2018 with spatial resolution of 100m
+| Variable | Description |
+|:-------------------------|:---------------------------------------------|
+| scientificName | latin name of the observed taxa |
+| family | family name of the observed taxa |
+| occurrenceID | ID of the occurence event (unique ID of the row) |
+| eventDate | date of the observation |
+| recordedBy | name of the observer |
+| decimalLongitude | longitude in decimal degree (WGS84) |
+| decimalLatitude | latitude in decimal degree (WGS84) |
+| municipality | municipality of the observation |
+| verbatimName | full name of the species, including reference |
+| genus | genus of the taxa |
+| taxonRank | rank of the taxa |
+| taxonID | ID of the taxa (from GBIF) |
+| id_1000 | ID of the grid cell at 1km resolution |
+| id_5000 | ID of the grid cell at 5km resolution |
+| id_10000 | ID of the grid cell at 10km resolution |
+| source | database of origin (steli or atlas) |
+| x_ETRS89_LAEA | longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| y_ETRS89_LAEA | latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| region | administrative region of the observation |
+| departement | administrative department of the observation |
+| elevation_m | elevation (in m), from [Copernicus GLO-30 dataset](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) |
+| GEnS_v3_bioclim | bioclimatic region, from [Metzger et al. 2013](https://doi.org/10.1111/geb.12022) |
+| popdensity_hab_per_km2 | population density in 2006 from [EEA Geostat data](ttps://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761) |
+| CLC2018_landcover | [Corine land cover class](https://land.copernicus.eu/en/products/corine-land-cover/clc2018) of 2018 with spatial resolution of 100m |
 
 ## Summarize data
 
@@ -77,7 +75,6 @@ nsp <- dat[, .N, by = scientificName][order(-N), ]
 
 nsp |> datatable()
 ```
-
 
 ## Species barplot
 
@@ -96,7 +93,6 @@ ggplot(nsp) +
 ggsave(file.path(fig_folder, "spp_barplot.png"),
        width = 8, height = 6, dpi = 300)
 ```
-
 
 ### Data evolution
 
@@ -189,5 +185,3 @@ ggplot() +
 ggsave(file.path(fig_folder, "map.png"),
        width = 8, height = 6, dpi = 300)
 ```
-
-
