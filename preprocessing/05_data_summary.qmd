@@ -4,12 +4,12 @@ format:
   html:
     code-fold: true
     embed-resources: true
-editor: source
 ---
 
 ## Libraries etc
 
 ```{r}
+#| warning: false
 library(here)
 
 library(data.table)
@@ -22,43 +22,46 @@ library(dplyr)
 library(sf)
 
 read_folder <- here("data/03_grid")
-fig_folder <- here("figures/03_data_summary")
+fig_folder <- here("figures/preprocessing")
 ```
 
-## Prepare data
 
-### Read data
+## Load data
 
 ```{r}
-df_steli <- readRDS(file.path(read_folder, "steli.rds"))
-df_atlas <- readRDS(file.path(read_folder, "atlas.rds"))
+dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 
-df_steli <- as.data.table(df_steli)
-df_atlas <- as.data.table(df_atlas)
+dim(dat)
+str(dat)
 ```
 
-### Format data
 
-```{r}
-df_steli[, source := "STELI"]
-df_atlas[, source := "atlas"]
-```
-
-```{r}
-dat <- rbind(df_steli,
-             df_atlas,
-             fill = TRUE)
-```
-
-```{r}
-rm(df_atlas)
-rm(df_steli)
-```
-
-```{r}
-# Filter only species level information
-dat <- dat[taxonRank == "SPECIES", ]
-```
+Variable| Description
+:-----|:----------
+scientificName| latin name of the observed taxa
+family| family name of the observed taxa
+occurrenceID| ID of the occurence event (unique ID of the row)
+eventDate| date of the observation
+recordedBy| name of the observer
+decimalLongitude| longitude in decimal degree (WGS84)
+decimalLatitude| latitude in decimal degree (WGS84)
+municipality| municipality of the observation
+verbatimName| full name of the species, including reference
+genus| genus of the taxa   
+taxonRank| rank of the taxa
+taxonID| ID of the taxa (from GBIF)              
+id_1000| ID of the grid cell at 1km resolution
+id_5000| ID of the grid cell at 5km resolution
+id_10000| ID of the grid cell at 10km resolution
+source| database of origin (steli or atlas)                
+x_ETRS89_LAEA| longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection
+y_ETRS89_LAEA| latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection
+region| administrative region of the observation
+departement| administrative department of the observation
+elevation_m| elevation (in m), from [Copernicus GLO-30 dataset](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM)
+GEnS_v3_bioclim| bioclimatic region, from [Metzger et al. 2013](https://doi.org/10.1111/geb.12022)
+popdensity_hab_per_km2| population density in 2006 from [EEA Geostat data](ttps://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761)
+CLC2018_landcover| [Corine land cover class](https://land.copernicus.eu/en/products/corine-land-cover/clc2018) of 2018 with spatial resolution of 100m
 
 ## Summarize data
 
@@ -74,6 +77,7 @@ nsp <- dat[, .N, by = scientificName][order(-N), ]
 
 nsp |> datatable()
 ```
+
 
 ## Species barplot
 
@@ -92,6 +96,7 @@ ggplot(nsp) +
 ggsave(file.path(fig_folder, "spp_barplot.png"),
        width = 8, height = 6, dpi = 300)
 ```
+
 
 ### Data evolution
 
@@ -119,31 +124,29 @@ ggsave(file.path(fig_folder, "dat_evolution.png"),
 
 ```{r}
 dat_sf <- st_as_sf(dat,
-                   wkt = "decimalCoordinates")
-st_crs(dat_sf) <- 4326
+                   coords = c("x_ETRS89_LAEA", "y_ETRS89_LAEA"))
+st_crs(dat_sf) <- 3035
 
-# Transform
-dat_3035 <- st_transform(dat_sf, crs = 3035)
+# Data bounding box
+bbox <- st_bbox(dat_sf)
 ```
+
+Plot raw data points:
 
 ```{r}
 # Get French map
 fr <- ne_countries(scale = 50, 
                    country = "France")
 fr_3035 <- st_transform(fr, 3035)
-
-# Data bounding box
-bbox <- st_bbox(dat_3035)
 ```
 
-Plot raw data points:
-
 ```{r}
+#| eval: false
 ggplot() +
   geom_sf(data = fr_3035) +
   xlim(bbox$xmin, bbox$xmax) +
   ylim(bbox$ymin, bbox$ymax) +
-  geom_sf(data = dat_3035,
+  geom_sf(data = dat_sf,
           aes(col = source), size = 0.1) +
   facet_wrap(facets = vars(source))
 ```
@@ -159,12 +162,11 @@ grid <- readRDS(file.path(read_folder,
 ```{r}
 # Sumarize with grid
 nobs <- st_drop_geometry(dat) |>
-  group_by(id_10000) |>
+  group_by(id_10000, source) |>
   summarize(nobs = n(), .groups = "drop")
 
 nobs_grid <- grid |>
   right_join(nobs, by = c("id" = "id_10000"))
-nobs_grid <- st_intersection(nobs_grid, fr_3035)
 ```
 
 ```{r}
@@ -173,7 +175,7 @@ ggplot() +
   geom_sf(data = fr_3035) +
   geom_sf(data = nobs_grid, aes(fill = nobs),
           color = "transparent") +
-  # facet_grid(cols = vars(source)) +
+  facet_grid(cols = vars(source)) +
   xlim(bbox$xmin, bbox$xmax) +
   ylim(bbox$ymin, bbox$ymax) +
   scale_fill_viridis_c(na.value = "lightgrey",
@@ -187,4 +189,5 @@ ggplot() +
 ggsave(file.path(fig_folder, "map.png"),
        width = 8, height = 6, dpi = 300)
 ```
+
 
