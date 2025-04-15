@@ -121,15 +121,15 @@ wrap_plots(glist)
 # Add grid id to data -----------------------------------------------------
 
 ## Read data -----
-df_steli <- readRDS(file = file.path(read_folder, "steli.rds"))
+df_steli <- readRDS(file.path(read_folder, "steli.rds"))
 df_atlas <- readRDS(file.path(read_folder, "atlas.rds"))
 
 sf_steli <- st_as_sf(df_steli,
-                     coords = c("decimalLongitude", "decimalLatitude"))
+                     coords = c("decimalLongitude", "decimalLatitude"), remove=FALSE)
 st_crs(sf_steli) <- 4326
 
 sf_atlas <- st_as_sf(df_atlas,
-                     coords = c("decimalLongitude", "decimalLatitude"))
+                     coords = c("decimalLongitude", "decimalLatitude"), remove=FALSE)
 st_crs(sf_atlas) <- 4326
 
 # Transform CRS

@@ -5,46 +5,45 @@
 #
 # Date: 2025-03-20
 #
-# Script Description: create shapefile and get gis information
+# Script Description: create shapefile and get gis information for each point
 
 
 
-# Libraries etc -----------------------------------------------------------
+# Libraries, parameters -----------------------------------------------------------
 library(terra)
 library(sf)
 library(here)
 
-read_folder <- here("data", "02_clean")
+read_folder <- here("data", "03_clean")
 data_folder <- here("data", "gis")
-extdata_folder <- here("~/OneDrive/2025_internship_Thomas_MICHEL-PALUDAN/data/gis")
+extdata_folder <- here("~/OneDrive/Documents/Data/")
 
-## Read data -----
+# Read data ----------------------------------------------------------------
 df_steli <- readRDS(file.path(read_folder, "steli.rds"))
 df_atlas <- readRDS(file.path(read_folder, "atlas.rds"))
 
+# Get the coordinates of all observations
 coocol <- c("decimalLongitude", "decimalLatitude")
 coo <- rbind(df_steli[,coocol], df_atlas[,coocol])
 
+# to make faster extraction, select only unique coordinates
 coo <- coo[!duplicated(coo),]
 dim(coo) # 263427 unique coordinates
 
 # create vector spatial layer
 shp <- st_as_sf(coo, coords = coocol, crs = 4326)
 
-# add an id
-id_coo <- paste(coo[,1], coo[,2], sep="_")
-shp$id_coo <- id_coo
-
-# Export shapefile, if needed
+# Export shapefile, if needed 
 # st_write(shp, here(data_folder,"shape_all.shp"), append=FALSE)
 
 
-## Get and extract GIS data --------------------
+# Get and extract GIS data ---------------------------------------
 
 # administrative regions -----------
-gadm <- vect(here(extdata_folder, "gadm", "gadm41_FRA_2.shp"))
-gadm_points <- extract(gadm, vect(shp)) # take some time to compute ...
+gadm <- vect(here(extdata_folder,"gadm", "gadm41_FRA_2.shp"))
+gadm_points <- extract(gadm, vect(shp)) # take some time to compute
 # table(gadm_points$NAME_1, useNA="ifany")
+
 
 # elevation ------------
 # the best source of data ae EU scale is Copernicus GLO-30
@@ -56,7 +55,7 @@ glo30 <- glo30[order(glo30$FID),]
 
 
 # Bioclimatic regions ---------
-# Metzger et al. 2013 https://doi.org/10.1111/geb.12022
+# Metzger et al. 2013 https://doi.org/10.1111/geb.12022 
 gens <-  rast(here(data_folder, "eu_croped_gens_v3.tif"))
 meta_gens <- read.csv(here(data_folder, "GEnS_v3_classification.csv"))
 gens_points <- extract(gens, shp)
@@ -73,8 +72,10 @@ pop_points <- extract(pop, shp_3035)
 # NA means 0
 pop_points$Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006[is.na(pop_points$Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006)] <- 0
 
+
 # CORINE land cover 2018 -----------------
-# https://land.copernicus.eu/en/products/corine-land-cover/clc2018
+# https://land.copernicus.eu/en/products/corine-land-cover/clc2018 
+# with 100m resolution (but we could get Corine plus at 10m)
 clc <- rast(here(extdata_folder,"Corine", "u2018_clc2018_v2020_20u1_raster100m/DATA/U2018_CLC2018_V2020_20u1.tif"))
 # extract the values of land cover
 clc_points <- extract(clc, shp_3035)
@@ -97,6 +98,4 @@ gis_info <- data.frame(
   "CLC2018_landcover" = clc_points$LABEL3
 )
 
-write.csv(gis_info, here(read_folder, "gis_info.csv"))
-
-gis_info <- read.csv(here(read_folder, "gis_info.csv"))
+write.csv(gis_info, here(read_folder, "gis_info.csv"), row.names=FALSE)
