@@ -1,5 +1,5 @@
 ---
-title: "données résumées"
+title: "Summarize data"
 format:
   html:
     code-fold: true
@@ -35,7 +35,7 @@ str(dat)
 ```
 
 | Variable | Description |
-|:-------------------------|:---------------------------------------------|
+|:-----------------------------------|:-----------------------------------|
 | scientificName | latin name of the observed taxa |
 | family | family name of the observed taxa |
 | occurrenceID | ID of the occurence event (unique ID of the row) |
