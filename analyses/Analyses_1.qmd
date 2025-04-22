@@ -1,0 +1,133 @@
+---
+title: "Analyses_1"
+format:
+  html:
+    number-sections: true
+    embed-resources: true
+editor: visual
+---
+
+## Bibliothèques et chemins
+
+```{r}
+#| warning: false
+library(here)
+library(data.table)
+library(DT)
+library(ggplot2)
+library(rnaturalearth)
+library(dplyr)
+library(terra)
+library(sf)
+library(scales)
+
+read_folder <- here("data/03_grid")
+gisdata_folder <- here("data/gis")
+fig_folder <- here("figures/preprocessing")
+```
+
+## Chargement des données
+
+```{r}
+dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
+
+dim(dat)
+str(dat)
+```
+
+| Variable | Description |
+|:-----------------------------------|:-----------------------------------|
+| scientificName | latin name of the observed taxa |
+| family | family name of the observed taxa |
+| occurrenceID | ID of the occurence event (unique ID of the row) |
+| eventDate | date of the observation |
+| recordedBy | name of the observer |
+| decimalLongitude | longitude in decimal degree (WGS84) |
+| decimalLatitude | latitude in decimal degree (WGS84) |
+| municipality | municipality of the observation |
+| verbatimName | full name of the species, including reference |
+| genus | genus of the taxa |
+| taxonRank | rank of the taxa |
+| taxonID | ID of the taxa (from GBIF) |
+| id_1000 | ID of the grid cell at 1km resolution |
+| id_5000 | ID of the grid cell at 5km resolution |
+| id_10000 | ID of the grid cell at 10km resolution |
+| source | database of origin (steli or atlas) |
+| x_ETRS89_LAEA | longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| y_ETRS89_LAEA | latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| region | administrative region of the observation |
+| departement | administrative department of the observation |
+| elevation_m | elevation (in m), from [Copernicus GLO-30 dataset](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) |
+| GEnS_v3_bioclim | bioclimatic region, from [Metzger et al. 2013](https://doi.org/10.1111/geb.12022) |
+| popdensity_hab_per_km2 | population density in 2006 from [EEA Geostat data](ttps://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761) |
+| CLC2018_landcover | [Corine land cover class](https://land.copernicus.eu/en/products/corine-land-cover/clc2018) of 2018 with spatial resolution of 100m |
+
+## Etude du biais spatial d'occupation des sols
+
+L'objectif de cette partie est de comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine. 
+
+Dans un premier temps, on va utiliser la classification Corine telle que renseignée dans le jeu de donnée (CLC2018_landcover), observer la distribution des classes (ie la distribution attendue des observations en supposant une répartition systématique) et la comparer à la distribution réelle des observations au sein de ces classes.
+
+### Distribution attendue des classes d'occupation des sols
+
+Quelle proportion du territoire métropolitain est couverte par chaque classe CLC ?
+
+Données : 
+- raster CLC2018 100m (France métropole + outre mer) https://land.copernicus.eu/en/products/corine-land-cover/clc2018
+- shapefile frontières France métropole https://gadm.org/download_country.html
+
+A partir du script de Romain 06_expected_distri :
+
+```{r}
+# Importer le vecteur France métropole
+fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
+# Importer le raster CLC2018 100 m
+clc <- rast(here(gisdata_folder, "180029","Results","U2018_CLC2018_V2020_20u1","U2018_CLC2018_V2020_20u1","U2018_CLC2018_V2020_20u1.tif"))
+# Reprojetter le vecteur pour le superposer au raster
+fr_3035 <- project(fr, crs(clc))
+# Couper le raster aux frontières de la métropole
+clc_fr <- crop(clc, fr_3035, mask=TRUE)
+# Récupère les valeurs de chaque pixel et compte leur fréquence
+clc_values <- values(clc_fr)
+nclc <- table(clc_values)
+# Calculer la proportion du territoire métropolitain couverte par chaque classe CLC
+france_clc <- data.frame(
+  "LABEL3"=levels(clc)[[1]]$LABEL3[levels(clc)[[1]]$Value%in%names(nclc)],
+  "count"=as.numeric(nclc),
+  "perc"=round(as.numeric(nclc)/sum(nclc)*100,3)
+)
+# Stocker le résultat dans un CSV
+write.csv(france_clc, 
+  here::here(read_folder, "france_clc2018_100m.csv"), row.names=FALSE)
+```
+```{r}
+is.factor(clc)
+
+```
+
+
+### Distribution observée des classes d'occupation des sols dans les données odonate
+
+```{r}
+# Nombre d'observations par classe CLC
+clc_observed <- dat[, .N, by = CLC2018_landcover][order(-N), ]
+clc_observed |> datatable()
+```
+
+```{r}
+# Barplot
+ggplot(clc_observed) +
+  geom_col(aes(x = N, 
+               y = reorder(CLC2018_landcover, N)), fill = "darkorange") +
+  xlab("Nombre d'occurrences") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+
+
+
+
