@@ -14,7 +14,7 @@ library(terra)
 library(sf)
 library(here)
 
-read_folder <- here("data", "03_clean")
+read_folder <- here("data", "03_grid")
 data_folder <- here("data", "gis")
 extdata_folder <- here("~/OneDrive/Documents/Data/")
 
@@ -40,6 +40,7 @@ shp <- st_as_sf(coo, coords = coocol, crs = 4326)
 # Get and extract GIS data ---------------------------------------
 
 # administrative regions -----------
+# from https://gadm.org/data.html
 gadm <- vect(here(extdata_folder,"gadm", "gadm41_FRA_2.shp"))
 gadm_points <- extract(gadm, vect(shp)) # take some time to compute
 # table(gadm_points$NAME_1, useNA="ifany")
@@ -80,7 +81,6 @@ clc <- rast(here(extdata_folder,"Corine", "u2018_clc2018_v2020_20u1_raster100m/D
 # extract the values of land cover
 clc_points <- extract(clc, shp_3035)
 # table(clc_points$LABEL3)
-
 
 ## Summarize and export -----------------
 coo_3035 <- st_coordinates(shp_3035)
