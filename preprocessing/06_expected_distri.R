@@ -8,7 +8,6 @@
 # Script Description: get distribution of gis values over the whole France
 
 
-
 library(terra)
 library(here)
 
@@ -45,24 +44,28 @@ write.csv(france_clc,
 
 
 
-
 # Bioclimatic regions ---------
 # Metzger et al. 2013 https://doi.org/10.1111/geb.12022 
 gens <-  rast(here(data_folder, "eu_croped_gens_v3.tif"))
 meta_gens <- read.csv(here(data_folder, "GEnS_v3_classification.csv"))
 
 gens_fr <- crop(gens, fr, mask=TRUE)
+# for non-equal area projection, pixels are not the same size
+# at the scale of France, it is acceptable, but best to avoid
+# gens_values <- values(gens_fr)
+# ngens <- table(gens_values)
+# for raster in lat/long, best to calculate statistics with expanse
+# if raster is too big, can be transform into polygons
+# with as.polygons()
+area_gens <- expanse(gens_fr, unit="km", byValue=TRUE)
 #plot(gens_fr)
-gens_values <- values(gens_fr)
-# not best to do for non-equal area, but at the scale of France, it is ok
-ngens <- table(gens_values)
 
 france_gens <- data.frame(
-  "GEnS"=meta_gens$GEnS[match(names(ngens), meta_gens$GEnS_seq)],
-  "GEnZname"=meta_gens$GEnZname[match(names(ngens), meta_gens$GEnS_seq)],
-  "count"=as.numeric(ngens),
-  "perc"=round(as.numeric(ngens)/sum(ngens)*100,3)
+  "GEnS"=meta_gens$GEnS[match(area_gens$value, meta_gens$GEnS_seq)],
+  "GEnZname"=meta_gens$GEnZname[match(area_gens$value, meta_gens$GEnS_seq)],
+  "count"=as.numeric(area_gens$area),
+  "perc"=round(as.numeric(area_gens$area)/sum(area_gens$area)*100,3)
 )
+
 write.csv(france_gens, 
   here::here(read_folder, "france_GEnS_v3.csv"), row.names=FALSE)
-
