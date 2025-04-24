@@ -64,7 +64,7 @@ str(dat)
 
 ## Etude du biais spatial d'occupation des sols
 
-L'objectif de cette partie est de comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine. 
+L'objectif de cette partie est de comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine.
 
 Dans un premier temps, on va utiliser la classification Corine telle que renseignée dans le jeu de donnée (CLC2018_landcover), observer la distribution des classes (ie la distribution attendue des observations en supposant une répartition systématique) et la comparer à la distribution réelle des observations au sein de ces classes.
 
@@ -72,53 +72,46 @@ Dans un premier temps, on va utiliser la classification Corine telle que renseig
 
 Quelle proportion du territoire métropolitain est couverte par chaque classe CLC ?
 
-Données : 
-- raster CLC2018 100m (France métropole + outre mer) https://land.copernicus.eu/en/products/corine-land-cover/clc2018
-- shapefile frontières France métropole https://gadm.org/download_country.html
+Données :
 
-A partir du script de Romain 06_expected_distri :
+-   raster CLC2018 100m (France métropole + outre mer) https://land.copernicus.eu/en/products/corine-land-cover/clc2018
+
+-   shapefile frontières France métropole https://gadm.org/download_country.html
 
 ```{r}
 # Importer le vecteur France métropole
 fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
-# Importer le raster CLC2018 100 m
-clc <- rast(here(gisdata_folder, "180029","Results","U2018_CLC2018_V2020_20u1","U2018_CLC2018_V2020_20u1","U2018_CLC2018_V2020_20u1.tif"))
+# Importer le raster CLC2018 100m
+clc <- rast(here(gisdata_folder, "180451","Results","u2018_clc2018_v2020_20u1_raster100m","u2018_clc2018_v2020_20u1_raster100m","DATA","U2018_CLC2018_V2020_20u1.tif"))
 # Reprojetter le vecteur pour le superposer au raster
 fr_3035 <- project(fr, crs(clc))
 # Couper le raster aux frontières de la métropole
 clc_fr <- crop(clc, fr_3035, mask=TRUE)
-# Récupère les valeurs de chaque pixel et compte leur fréquence
+# Récupérer les valeurs de chaque pixel et compter leur fréquence
 clc_values <- values(clc_fr)
 nclc <- table(clc_values)
 # Calculer la proportion du territoire métropolitain couverte par chaque classe CLC
 france_clc <- data.frame(
-  "LABEL3"=levels(clc)[[1]]$LABEL3[levels(clc)[[1]]$Value%in%names(nclc)],
-  "count"=as.numeric(nclc),
-  "perc"=round(as.numeric(nclc)/sum(nclc)*100,3)
+  "CLC2018_landcover"=levels(clc)[[1]]$LABEL3[levels(clc)[[1]]$Value%in%names(nclc)],
+  "N_exp"=as.numeric(nclc),
+  "perc_exp"=round(as.numeric(nclc)/sum(nclc)*100,3)
 )
 # Stocker le résultat dans un CSV
 write.csv(france_clc, 
   here::here(read_folder, "france_clc2018_100m.csv"), row.names=FALSE)
 ```
-```{r}
-is.factor(clc)
-
-```
-
-
-### Distribution observée des classes d'occupation des sols dans les données odonate
 
 ```{r}
-# Nombre d'observations par classe CLC
-clc_observed <- dat[, .N, by = CLC2018_landcover][order(-N), ]
-clc_observed |> datatable()
+clc_expected <- as.data.table(france_clc)
+clc_expected <- clc_expected[order(-N_exp)]
+clc_expected |> datatable()
 ```
 
 ```{r}
 # Barplot
-ggplot(clc_observed) +
-  geom_col(aes(x = N, 
-               y = reorder(CLC2018_landcover, N)), fill = "darkorange") +
+ggplot(clc_expected) +
+  geom_col(aes(x = N_exp, 
+               y = reorder(CLC2018_landcover, N_exp)), fill = "darkorange") +
   xlab("Nombre d'occurrences") +
   scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
   theme_minimal(base_size = 16) +
@@ -128,6 +121,99 @@ ggplot(clc_observed) +
                                    size = 6))
 ```
 
+### Distribution observée des classes d'occupation des sols dans les données odonate
 
+```{r}
+# Nombre d'observations par classe CLC
+clc_observed <- dat[, .N, by = CLC2018_landcover][, perc_obs := round(N / sum(N) * 100, 2)][order(-N)]
+setnames(clc_observed, c("CLC2018_landcover", "N", "perc_obs"), c("CLC2018_landcover", "N_obs", "perc_obs"))
+clc_observed |> datatable()
+```
 
+```{r}
+# Barplot
+ggplot(clc_observed) +
+  geom_col(aes(x = N_obs, 
+               y = reorder(CLC2018_landcover, N_obs)), fill = "darkorange") +
+  xlab("Nombre d'occurrences") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
 
+### Comparaison des distributions attendue et observée
+
+On va maintenant produire des graphiques et tableaux comparatifs des 2 distributions pour visualiser les biais, avant de tester statistiquement les différences de distribution des classes CLC.
+
+```{r}
+# Joindre les 2 distributions par les ID CLC
+clc_comp <- clc_observed[clc_expected, on = .(CLC2018_landcover)]
+clc_comp |> datatable()
+```
+
+```{r}
+# Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
+clc_long <- melt(clc_comp,
+                 id.vars = "CLC2018_landcover",
+                 measure.vars = c("perc_obs", "perc_exp"),
+                 variable.name = "type",
+                 value.name = "perc")
+# Barplot
+ggplot(clc_long[!is.na(perc)], aes(x = reorder(CLC2018_landcover, perc),
+                     y = perc, 
+                     fill = type)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_manual(values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue")) +
+  labs(x = NULL, y = "Proportion (%)", fill = "Type de donnée") +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"),
+        legend.position = "top")
+```
+
+```{r}
+# Filtrage des N/A
+clc_clean <- clc_comp[!is.na(N_obs) & !is.na(N_exp)]
+# Test du Khi²
+chisq.test(x = clc_clean$N_obs, 
+           p = clc_clean$N_exp / sum(clc_clean$N_exp))
+```
+
+p-value \< 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
+
+```{r}
+# Calcul de la contribution des classes au khi²
+res_khi2 <- chisq.test(x = clc_clean$N_obs, 
+                        p = clc_clean$N_exp / sum(clc_clean$N_exp))
+clc_clean[, contrib_khi2 := 100 * (N_obs - res_khi2$expected)^2 / res_khi2$expected]
+clc_clean |> data.table()
+```
+
+```{r}
+# Visualiser les contributions
+ggplot(clc_clean, aes(x = contrib_khi2, 
+                      y = reorder(CLC2018_landcover, contrib_khi2))) +
+  geom_col(fill = "tomato") +
+  labs(x = "Contribution au khi² (%)",
+       title = "Contribution de chaque classe CLC au test du khi²") +
+  theme_minimal(base_size = 14)
+```
+
+On voit donc quelles classes contribuent plus ou moins au khi², mais on voit bien que certaines classes contribuent énormément (ex : Inland marshes, Waterbodies, etc) alors qu'elles représentent peu d'observations, un faible effort d'échantillonnage, alors que d'autres comme Non-irrigated arable lands représentent une très grande partie des observations mais pas la plus forte contribution au khi². A voir comment faire pour (et si c'est pertinent de) pondérer la contribution de chaque classe au biais avec le nombre d'observations.
+
+```{r}
+# Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
+clc_clean[, deviation := N_obs - res_khi2$expected]
+ggplot(clc_clean, aes(x = deviation, 
+                      y = reorder(CLC2018_landcover, deviation))) +
+  geom_col(aes(fill = deviation > 0)) +
+  scale_fill_manual(values = c("steelblue", "tomato"), 
+                    labels = c("Sous-représentée", "Sur-représentée")) +
+  labs(x = "Écart entre observé et attendu")
+  theme_minimal(base_size = 14)
+```
+
+On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français.
