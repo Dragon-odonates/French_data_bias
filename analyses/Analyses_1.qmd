@@ -62,7 +62,7 @@ str(dat)
 | popdensity_hab_per_km2 | population density in 2006 from [EEA Geostat data](ttps://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761) |
 | CLC2018_landcover | [Corine land cover class](https://land.copernicus.eu/en/products/corine-land-cover/clc2018) of 2018 with spatial resolution of 100m |
 
-## Etude du biais spatial d'occupation des sols
+## Etude du biais spatial d'occupation des sols (CLC2018_landcover)
 
 L'objectif de cette partie est de comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine.
 
@@ -217,3 +217,72 @@ ggplot(clc_clean, aes(x = deviation,
 ```
 
 On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français.
+
+## Etude du biais spatial d'occupation des sols (classes agrégées)
+
+### Agrégation des classes CLC
+
+**Reclassification** :
+
+1.1 + 1.2 + 1.3 Milieux fortement anthropisés
+
+1.4 Espaces verts urbains
+
+2.1 + 2.2 Zones agricoles intensives
+
+2.3 + 2.4 Zones agricoles semi-naturelles
+
+3.1 Forêts
+
+3.2 + 3.3 Milieux semi-naturels
+
+4. Zones humides
+
+5. Surfaces en eau
+
+```{r}
+# Création d'une nouvelle colonne de regroupement
+dat[, clc_group := fcase(
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
+  "Milieux fortement anthropisés",
+
+  CLC2018_landcover %in% c("Green urban areas", "Sport and leisure facilities"),
+  "Espaces verts urbains",
+
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Ricefields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  "Zones agricoles intensives",
+
+  CLC2018_landcover %in% c("Pastures", "Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
+  "Zones agricoles semi-naturelles",
+
+# REPRENDRE ICI
+  
+  CLC2018_landcover == "Complex cultivation patterns",
+  "Agriculture hétérogène",
+
+  CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
+  "Forêts",
+
+  CLC2018_landcover %in% c("Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation"),
+  "Végétation semi-naturelle ouverte",
+
+  CLC2018_landcover %in% c("Transitional woodland-shrub", "Bare rocks", "Sparsely vegetated areas"),
+  "Milieux très ouverts ou dénudés",
+
+  CLC2018_landcover %in% c("Inland marshes", "Peat bogs"),
+  "Zones humides intérieures",
+
+  CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
+  "Zones humides côtières",
+
+  CLC2018_landcover %in% c("Water courses", "Water bodies"),
+  "Eaux intérieures",
+
+  CLC2018_landcover %in% c("Coastal lagoons", "Sea and ocean"),
+  "Eaux marines",
+
+  default = "Autres"
+)]
+
+```
+
