@@ -182,7 +182,7 @@ chisq.test(x = clc_clean$N_obs,
            p = clc_clean$N_exp / sum(clc_clean$N_exp))
 ```
 
-p-value \< 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
+p-value < 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
 
 ```{r}
 # Calcul de la contribution des classes au khi²
@@ -234,11 +234,143 @@ On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains
 
 3.1 Forêts
 
-3.2 + 3.3 Milieux semi-naturels
+3.2 Milieux ouverts semi-naturels
 
-4. Zones humides
+3.3 Milieux extrêmes
 
-5. Surfaces en eau
+4.1 + 5.1 Milieux humides continentaux
+
+4.2 Milieux humides côtiers
+
+5.2 Milieux marins et côtiers
+
+C'est avec ces groupes de classes qu'on va travailler à partir de maintenant.
+
+### Distribution attendue des groupes de classes d'occupation des sols 
+
+Quelle proportion du territoire métropolitain est couverte par chaque classe CLC ?
+
+Données :
+
+-   raster CLC2018 100m https://land.copernicus.eu/en/products/corine-land-cover/clc2018 
+
+-   shapefile frontières France métropole https://gadm.org/download_country.html
+
+```{r}
+# Importer le vecteur France métropole
+fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
+# Importer le raster CLC2018 100m
+clc <- rast(here(gisdata_folder, "180451","Results","u2018_clc2018_v2020_20u1_raster100m","u2018_clc2018_v2020_20u1_raster100m","DATA","U2018_CLC2018_V2020_20u1.tif"))
+# Reprojetter le vecteur pour le superposer au raster
+fr_3035 <- project(fr, crs(clc))
+# Couper le raster aux frontières de la métropole
+clc_fr <- crop(clc, fr_3035, mask=TRUE)
+```
+
+Maintenant qu'on a chargé le raster, il faut le reclassifier selon les groupes de classes qu'on a définit.
+Pour ça il faut aller chercher une table de correspondance entre le code CLC et le code des pixels du raster.
+
+Correspondance code CLC (3 chiffres) et grid_code (code raster, 2 chiffres) : https://clc.gios.gov.pl/doc/clc/CLC_Legend_EN.pdf
+
+Ensuite, on définit un code pour les groupes de classes : 
+-Code groupe de classe : nom groupe : codes classes correspondantes-
+1 : Milieux très anthropisés : 1-9
+2 : Espaces verts urbains : 10,11
+3 : Zones agricoles intensives :  12-17
+4 : Zones agricoles semi-naturelles : 18-22
+5 : Forêts : 23-25
+6 : Milieux ouverts semi-naturels : 26-29
+7 : Milieux extrêmes : 30-34
+8 : Milieux humides continentaux (inland wetlands + inland waters) : 35,36 + 40,41
+9 : Milieux humides côtiers : 37-39
+10 : Milieux marins : 42-44
+
+```{r}
+# Créer une matrice de correspondance (code CLC, code groupe)
+recl <- matrix(c(
+  1, 1,
+  2, 1,
+  3, 1,
+  4, 1,
+  5, 1,
+  6, 1,
+  7, 1,
+  8, 1,
+  9, 1,
+  10, 2,
+  11, 2,
+  12, 3,
+  13, 3,
+  14, 3,
+  15, 3,
+  16, 3,
+  17, 3,
+  18, 4,
+  20, 4,
+  21, 4,
+  22, 4,
+  23, 5,
+  24, 5,
+  25, 5,
+  26, 6,
+  27, 6,
+  28, 6,
+  29, 6,
+  30, 7,
+  31, 7,
+  32, 7,
+  33, 7,
+  34, 7,
+  35, 8,
+  36, 8,
+  37, 9,
+  38, 9,
+  39, 9,
+  40, 8,
+  41, 8,
+  42, 10,
+  43, 10,
+  44, 10,
+  48, NA
+), ncol = 2, byrow = TRUE)
+# Appliquer la reclassification sur le raster
+clc_grouped <- classify(clc_fr, recl)
+```
+
+On a donc changé les valeurs des pixels du raster, passant d'un code 1-44 (CLC) à un code 1-10 (groupes). Il faut maintenant changer les labels pour qu'ils correspondent aux groupes.
+
+```{r}
+# Définir les labels des groupes
+group_labels <- c(
+  "Milieux très anthropisés",
+  "Espaces verts urbains",
+  "Zones agricoles intensives",
+  "Zones agricoles semi-naturelles",
+  "Forêts",
+  "Milieux ouverts semi-naturels",
+  "Milieux extrêmes",
+  "Milieux humides continentaux",
+  "Milieux humides côtiers",
+  "Milieux marins"
+)
+# Créer un vecteur associant les codes de groupe (1-10) à leurs labels respectifs
+group_code_labels <- setNames(group_labels, 1:10)
+# Remplacer les codes de groupes par leurs labels respectifs
+clc_grouped_labels <- factor(clc_grouped, levels = 1:10, labels = group_labels)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+### Distribution observée des classes d'occupation des sols dans les données odonate
 
 ```{r}
 # Création d'une nouvelle colonne de regroupement
@@ -255,34 +387,24 @@ dat[, clc_group := fcase(
   CLC2018_landcover %in% c("Pastures", "Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
   "Zones agricoles semi-naturelles",
 
-# REPRENDRE ICI
-  
-  CLC2018_landcover == "Complex cultivation patterns",
-  "Agriculture hétérogène",
-
   CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
   "Forêts",
 
-  CLC2018_landcover %in% c("Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation"),
-  "Végétation semi-naturelle ouverte",
+  CLC2018_landcover %in% c("Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
+  "Milieux ouverts semi-naturels",
+  
+  CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Milieux extrêmes",
 
-  CLC2018_landcover %in% c("Transitional woodland-shrub", "Bare rocks", "Sparsely vegetated areas"),
-  "Milieux très ouverts ou dénudés",
-
-  CLC2018_landcover %in% c("Inland marshes", "Peat bogs"),
-  "Zones humides intérieures",
-
+  CLC2018_landcover %in% c("Inland marshes", "Peatbogs", "Water courses", "Water bodies"),
+  "Milieux humides continentaux",
+  
   CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
-  "Zones humides côtières",
+  "Milieux humides côtiers",
 
-  CLC2018_landcover %in% c("Water courses", "Water bodies"),
-  "Eaux intérieures",
-
-  CLC2018_landcover %in% c("Coastal lagoons", "Sea and ocean"),
-  "Eaux marines",
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
+  "Milieux marins",
 
   default = "Autres"
 )]
-
 ```
-
