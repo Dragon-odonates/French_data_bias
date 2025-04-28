@@ -79,6 +79,7 @@ Données :
 -   shapefile frontières France métropole https://gadm.org/download_country.html
 
 ```{r}
+#| eval: false
 # Importer le vecteur France métropole
 fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
 # Importer le raster CLC2018 100m
@@ -102,6 +103,8 @@ write.csv(france_clc,
 ```
 
 ```{r}
+clc_expected <- read.csv(file.path(read_folder, 
+                          "france_clc2018_100m.csv"))
 clc_expected <- as.data.table(france_clc)
 clc_expected <- clc_expected[order(-N_exp)]
 clc_expected |> datatable()
@@ -178,24 +181,27 @@ ggplot(clc_long[!is.na(perc)], aes(x = reorder(CLC2018_landcover, perc),
 # Filtrage des N/A
 clc_clean <- clc_comp[!is.na(N_obs) & !is.na(N_exp)]
 # Test du Khi²
-chisq.test(x = clc_clean$N_obs, 
-           p = clc_clean$N_exp / sum(clc_clean$N_exp))
+khi2 <- chisq.test(x = clc_clean$N_obs, 
+                        p = clc_clean$N_exp / sum(clc_clean$N_exp))
+khi2
 ```
 
 p-value < 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
 
+### Contributions des classes au Khi² (méthode 2 : directement avec résidus)
+
 ```{r}
 # Calcul de la contribution des classes au khi²
-res_khi2 <- chisq.test(x = clc_clean$N_obs, 
-                        p = clc_clean$N_exp / sum(clc_clean$N_exp))
-clc_clean[, contrib_khi2 := 100 * (N_obs - res_khi2$expected)^2 / res_khi2$expected]
+clc_clean[, contrib_khi2 := (khi2$stdres)^2]
 clc_clean |> data.table()
 ```
 
+
 ```{r}
-# Visualiser les contributions
-ggplot(clc_clean, aes(x = contrib_khi2, 
-                      y = reorder(CLC2018_landcover, contrib_khi2))) +
+# Visualiser les contributions en %
+clc_clean[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)]
+ggplot(clc_clean, aes(x = contrib_khi2_perc, 
+                      y = reorder(CLC2018_landcover, contrib_khi2_perc))) +
   geom_col(fill = "tomato") +
   labs(x = "Contribution au khi² (%)",
        title = "Contribution de chaque classe CLC au test du khi²") +
@@ -206,13 +212,14 @@ On voit donc quelles classes contribuent plus ou moins au khi², mais on voit bi
 
 ```{r}
 # Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
-clc_clean[, deviation := N_obs - res_khi2$expected]
+clc_clean[, deviation := khi2$stdres]
 ggplot(clc_clean, aes(x = deviation, 
                       y = reorder(CLC2018_landcover, deviation))) +
   geom_col(aes(fill = deviation > 0)) +
   scale_fill_manual(values = c("steelblue", "tomato"), 
                     labels = c("Sous-représentée", "Sur-représentée")) +
-  labs(x = "Écart entre observé et attendu")
+  labs(x = "Résidu standardisé",
+       title = "Sur- ou sous-représentation des classes CLC (résidus)") +
   theme_minimal(base_size = 14)
 ```
 
@@ -220,9 +227,69 @@ On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains
 
 ## Etude du biais spatial d'occupation des sols (classes agrégées)
 
-### Agrégation des classes CLC
+### Agrégation des classes CLC (méthode 2 : sur le data.table)
 
 **Reclassification** :
+
+1.1 + 1.2 + 1.3 Milieux fortement anthropisés
+
+1.4 Espaces verts urbains
+
+2.1 + 2.2 Zones agricoles intensives
+
+2.4 Zones agricoles semi-naturelles (?)
+
+3.1 Forêts
+
+2.3 + 3.2 Milieux ouverts semi-naturels
+
+3.3 Milieux extrêmes
+
+4.1 + 5.1 Milieux humides continentaux
+
+4.2 Milieux humides côtiers
+
+5.2 Milieux marins et côtiers
+
+C'est avec ces groupes de classes qu'on va travailler à partir de maintenant.
+
+### Distribution attendue des groupes de classes d'occupation des sols 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# En dessous = brouillon
+
+### Agrégation des classes CLC (méthode 2 : directement sur le SpatRaster)
+
+**Reclassification (à changer)** :
 
 1.1 + 1.2 + 1.3 Milieux fortement anthropisés
 
@@ -257,6 +324,7 @@ Données :
 -   shapefile frontières France métropole https://gadm.org/download_country.html
 
 ```{r}
+#| eval: false
 # Importer le vecteur France métropole
 fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
 # Importer le raster CLC2018 100m
@@ -286,6 +354,7 @@ Ensuite, on définit un code pour les groupes de classes :
 10 : Milieux marins : 42-44
 
 ```{r}
+#| eval: false
 # Créer une matrice de correspondance (code CLC, code groupe)
 recl <- matrix(c(
   1, 1,
@@ -340,28 +409,69 @@ clc_grouped <- classify(clc_fr, recl)
 On a donc changé les valeurs des pixels du raster, passant d'un code 1-44 (CLC) à un code 1-10 (groupes). Il faut maintenant changer les labels pour qu'ils correspondent aux groupes.
 
 ```{r}
-# Définir les labels des groupes
-group_labels <- c(
-  "Milieux très anthropisés",
-  "Espaces verts urbains",
-  "Zones agricoles intensives",
-  "Zones agricoles semi-naturelles",
-  "Forêts",
-  "Milieux ouverts semi-naturels",
-  "Milieux extrêmes",
-  "Milieux humides continentaux",
-  "Milieux humides côtiers",
-  "Milieux marins"
+#| eval: false
+# Créer une table de correspondance pour les groupes
+group_labels <- data.frame(
+  value = 1:10,
+  group_name = c(
+    "Milieux très anthropisés",
+    "Espaces verts urbains",
+    "Zones agricoles intensives",
+    "Zones agricoles semi-naturelles",
+    "Forêts",
+    "Milieux ouverts semi-naturels",
+    "Milieux extrêmes",
+    "Milieux humides continentaux",
+    "Milieux humides côtiers",
+    "Milieux marins"
+  )
 )
-# Créer un vecteur associant les codes de groupe (1-10) à leurs labels respectifs
-group_code_labels <- setNames(group_labels, 1:10)
-# Remplacer les codes de groupes par leurs labels respectifs
-clc_grouped_labels <- factor(clc_grouped, levels = 1:10, labels = group_labels)
+# Associer ces labels au raster
+levels(clc_grouped) <- group_labels
 ```
 
+On peut maintenant répéter les analyses réalisées précédemment sur les classes CLC2018_landcover.
 
+```{r}
+#| eval: false
+# Récupérer les valeurs de chaque pixel et compter leur fréquence
+clc_values <- values(clc_grouped)
+nclc_grouped <- table(clc_values)
+# Calculer la proportion du territoire métropolitain couverte par chaque classe CLC
+france_clc_grouped <- data.frame(
+  "landcover_groups"=group_labels$group_name[match(names(nclc_grouped), group_labels$value)],
+  "N_exp"=as.numeric(nclc_grouped),
+  "perc_exp"=round(as.numeric(nclc_grouped)/sum(nclc_grouped)*100,3)
+)
+# Stocker le résultat dans un CSV
+write.csv(france_clc_grouped, 
+  here::here(read_folder, "france_clc2018_100m_grouped.csv"), row.names=FALSE)
+```
 
+```{r}
+#| eval: false
+# Afficher le résultat
+clc_expected <- read.csv(file.path(read_folder, 
+                          "france_clc2018_100m_grouped.csv"))
+clc_expected <- as.data.table(france_clc_grouped)
+clc_expected <- clc_expected[order(-N_exp)]
+clc_expected |> datatable()
+```
 
+```{r}
+#| eval: false
+# Barplot
+ggplot(clc_expected) +
+  geom_col(aes(x = perc_exp, 
+               y = reorder(landcover_groups, N_exp)), fill = "darkorange") +
+  xlab("Part couverte du territoire de France métropole (%)") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
 
 
 
@@ -373,6 +483,7 @@ clc_grouped_labels <- factor(clc_grouped, levels = 1:10, labels = group_labels)
 ### Distribution observée des classes d'occupation des sols dans les données odonate
 
 ```{r}
+#| eval: false
 # Création d'une nouvelle colonne de regroupement
 dat[, clc_group := fcase(
   CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
