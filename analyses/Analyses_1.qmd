@@ -105,7 +105,7 @@ write.csv(france_clc,
 ```{r}
 clc_expected <- read.csv(file.path(read_folder, 
                           "france_clc2018_100m.csv"))
-clc_expected <- as.data.table(france_clc)
+clc_expected <- as.data.table(clc_expected)
 clc_expected <- clc_expected[order(-N_exp)]
 clc_expected |> datatable()
 ```
@@ -227,7 +227,7 @@ On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains
 
 ## Etude du biais spatial d'occupation des sols (classes agrégées)
 
-### Agrégation des classes CLC (méthode 2 : sur le data.table)
+### Agrégation des classes CLC (méthode 1 : sur le data.table)
 
 **Reclassification** :
 
@@ -237,7 +237,7 @@ On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains
 
 2.1 + 2.2 Zones agricoles intensives
 
-2.4 Zones agricoles semi-naturelles (?)
+2.4 Zones agricoles semi-naturelles
 
 3.1 Forêts
 
@@ -255,11 +255,126 @@ C'est avec ces groupes de classes qu'on va travailler à partir de maintenant.
 
 ### Distribution attendue des groupes de classes d'occupation des sols 
 
+```{r}
+# Création d'une nouvelle colonne de regroupement dans clc_expected
+clc_expected[, landcover_groups := fcase(
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
+  "Milieux fortement anthropisés",
 
+  CLC2018_landcover %in% c("Green urban areas", "Sport and leisure facilities"),
+  "Espaces verts urbains",
 
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Ricefields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  "Zones agricoles intensives",
 
+  CLC2018_landcover %in% c("Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
+  "Zones agricoles semi-naturelles",
 
+  CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
+  "Forêts",
 
+  CLC2018_landcover %in% c("Pastures", "Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
+  "Milieux ouverts semi-naturels",
+  
+  CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Milieux extrêmes",
+
+  CLC2018_landcover %in% c("Inland marshes", "Peatbogs", "Water courses", "Water bodies"),
+  "Milieux humides continentaux",
+  
+  CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
+  "Milieux humides côtiers",
+
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
+  "Milieux marins",
+
+  default = "Autres"
+)]
+```
+```{r}
+# Agréger les effectifs par landcover_groups
+landcover_groups_expected <- clc_expected[, .(N_exp = sum(N_exp, na.rm = TRUE)), by = landcover_groups]
+# Calculer les perc_exp par groupe
+landcover_groups_expected[, perc_exp := 100 * N_exp / sum(N_exp)]
+landcover_groups_expected |> datatable()
+```
+
+```{r}
+# Barplot
+ggplot(landcover_groups_expected) +
+  geom_col(aes(x = N_exp, 
+               y = reorder(landcover_groups, N_exp)), fill = "darkorange") +
+  xlab("Nombre d'occurrences") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+
+### Distribution observée des classes d'occupation des sols dans les données odonate
+
+```{r}
+# Création d'une nouvelle colonne de regroupement dans dat
+dat <- as.data.table(dat)
+dat[, landcover_groups := fcase(
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
+  "Milieux fortement anthropisés",
+
+  CLC2018_landcover %in% c("Green urban areas", "Sport and leisure facilities"),
+  "Espaces verts urbains",
+
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Ricefields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  "Zones agricoles intensives",
+
+  CLC2018_landcover %in% c("Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
+  "Zones agricoles semi-naturelles",
+
+  CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
+  "Forêts",
+
+  CLC2018_landcover %in% c("Pastures", "Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
+  "Milieux ouverts semi-naturels",
+  
+  CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Milieux extrêmes",
+
+  CLC2018_landcover %in% c("Inland marshes", "Peatbogs", "Water courses", "Water bodies"),
+  "Milieux humides continentaux",
+  
+  CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
+  "Milieux humides côtiers",
+
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
+  "Milieux marins",
+
+  default = "Autres"
+)]
+```
+
+```{r}
+# Agréger les effectifs par landcover_groups
+landcover_groups_observed <- dat[, .(N_obs = .N), by = landcover_groups]
+# Calculer les perc_obs par groupe
+landcover_groups_observed[, perc_obs := 100 * N_obs / sum(N_obs)]
+landcover_groups_observed <- landcover_groups_observed[order(-N_obs)]
+landcover_groups_observed |> datatable()
+```
+
+```{r}
+# Barplot
+ggplot(landcover_groups_observed) +
+  geom_col(aes(x = N_obs, 
+               y = reorder(landcover_groups, N_obs)), fill = "darkorange") +
+  xlab("Nombre d'occurrences") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
 
 
 
