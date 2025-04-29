@@ -4,7 +4,7 @@ format: html
 editor: visual
 ---
 
-# (15/04) Manipuler des données spatiales avec sf et faire des facettes avec ggplot2 
+# (15/04) Manipuler des données spatiales avec sf et faire des facettes avec ggplot2
 
 On va créer un petit dataset de 6 points fictifs dans deux "sources", avec leurs coordonnées.
 
@@ -143,7 +143,7 @@ ggplot() +
 
 Carte pas très intéressante avec ce jeu de données mais bon voilà.
 
-# (16/04, 17/04) Se familiariser à data.table sur les données odonates 
+# (16/04, 17/04) Se familiariser à data.table sur les données odonates
 
 ## Charger les données avec data.table
 
@@ -266,6 +266,7 @@ read_folder <- here("data/03_grid")
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 dat <- as.data.table(dat)
 ```
+
 ```{r}
 # Je dois réduire la taille des données pour simplifier les exercices
 ## création d’une nouvelle colonne year
@@ -273,7 +274,6 @@ dat[ , year := year(eventDate)]
 ## filtrage du jeu de donnée
 dat_2018 <- dat[year=="2018"]
 ```
-
 
 ## Cartes simples avec sf et rnaturalearth
 
@@ -400,7 +400,7 @@ ggplot(dat_year, aes(x = year, y = n_species, color = source)) +
   theme_minimal()
 ```
 
-# (18/04) Exercice poussé : Quelles sont les 3 régions avec la plus grande richesse spécifique moyenne par commune ? 
+# (18/04) Exercice poussé : Quelles sont les 3 régions avec la plus grande richesse spécifique moyenne par commune ?
 
 ```{r}
 # créer une table avec les communes et les régions
@@ -416,7 +416,7 @@ moy_sp_comm_by_region <- n_sp_comm_reg[, .(moy_comm = mean(n_species, na.rm = TR
 moy_sp_comm_by_region[order(-moy_comm)]
 ```
 
-J'obtiens la bonne solution mais je peux simplifier le code : 
+J'obtiens la bonne solution mais je peux simplifier le code :
 
 ```{r}
 # compter le nombre d'espèces par commune tout en gardant la région dans la table 
@@ -426,6 +426,7 @@ moy_sp_comm_by_region <- n_sp_comm_reg[, .(moy_comm = mean(n_species, na.rm = TR
 # afficher les 3 plus grandes moyennes régionales
 moy_sp_comm_by_region[order(-moy_comm)][1:3]
 ```
+
 Cette version est plus concise mais sous-estime de moitié les moyennes régionales, ça indique une incohérence quelque part, par exemple si certaines communes sont liées à plusieurs régions, à vérifier.
 
 ## Vérification du lien communes-régions dans les données (18/04)
@@ -472,8 +473,242 @@ moy_sp_id_par_region <- n_sp_id_reg[, .(moy_id = mean(n_species, na.rm = TRUE)),
 moy_sp_id_par_region[order(-moy_id)][1:3]
 ```
 
-Je n'obtiens pas le même résultat, pourquoi ?
-En fait c'est probablement le même problème mais pour d'autres raisons, la grille 10km² ne suit pas les limites régionales donc certaines cellules doivent probablement être rattachées à plusieurs régions, ce qui crée encore une fois des incohérences selon la manière de calculer.
+Je n'obtiens pas le même résultat, pourquoi ? En fait c'est probablement le même problème mais pour d'autres raisons, la grille 10km² ne suit pas les limites régionales donc certaines cellules doivent probablement être rattachées à plusieurs régions, ce qui crée encore une fois des incohérences selon la manière de calculer.
 
 Bref si je veux faire des richesses spécifiques moyennes régionales je sais pas trop quelle est la meilleure méthode au final...
 
+
+# En dessous = brouillon
+
+### Agrégation des classes CLC (méthode 2 : directement sur le SpatRaster)
+
+**Reclassification (à changer)** :
+
+1.1 + 1.2 + 1.3 Milieux fortement anthropisés
+
+1.4 Espaces verts urbains
+
+2.1 + 2.2 Zones agricoles intensives
+
+2.3 + 2.4 Zones agricoles semi-naturelles
+
+3.1 Forêts
+
+3.2 Milieux ouverts semi-naturels
+
+3.3 Milieux extrêmes
+
+4.1 + 5.1 Milieux humides continentaux
+
+4.2 Milieux humides côtiers
+
+5.2 Milieux marins et côtiers
+
+C'est avec ces groupes de classes qu'on va travailler à partir de maintenant.
+
+### Distribution attendue des groupes de classes d'occupation des sols 
+
+Quelle proportion du territoire métropolitain est couverte par chaque classe CLC ?
+
+Données :
+
+-   raster CLC2018 100m https://land.copernicus.eu/en/products/corine-land-cover/clc2018 
+
+-   shapefile frontières France métropole https://gadm.org/download_country.html
+
+```{r}
+#| eval: false
+# Importer le vecteur France métropole
+fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
+# Importer le raster CLC2018 100m
+clc <- rast(here(gisdata_folder, "180451","Results","u2018_clc2018_v2020_20u1_raster100m","u2018_clc2018_v2020_20u1_raster100m","DATA","U2018_CLC2018_V2020_20u1.tif"))
+# Reprojetter le vecteur pour le superposer au raster
+fr_3035 <- project(fr, crs(clc))
+# Couper le raster aux frontières de la métropole
+clc_fr <- crop(clc, fr_3035, mask=TRUE)
+```
+
+Maintenant qu'on a chargé le raster, il faut le reclassifier selon les groupes de classes qu'on a définit.
+Pour ça il faut aller chercher une table de correspondance entre le code CLC et le code des pixels du raster.
+
+Correspondance code CLC (3 chiffres) et grid_code (code raster, 2 chiffres) : https://clc.gios.gov.pl/doc/clc/CLC_Legend_EN.pdf
+
+Ensuite, on définit un code pour les groupes de classes : 
+-Code groupe de classe : nom groupe : codes classes correspondantes-
+1 : Milieux très anthropisés : 1-9
+2 : Espaces verts urbains : 10,11
+3 : Zones agricoles intensives :  12-17
+4 : Zones agricoles semi-naturelles : 18-22
+5 : Forêts : 23-25
+6 : Milieux ouverts semi-naturels : 26-29
+7 : Milieux extrêmes : 30-34
+8 : Milieux humides continentaux (inland wetlands + inland waters) : 35,36 + 40,41
+9 : Milieux humides côtiers : 37-39
+10 : Milieux marins : 42-44
+
+```{r}
+#| eval: false
+# Créer une matrice de correspondance (code CLC, code groupe)
+recl <- matrix(c(
+  1, 1,
+  2, 1,
+  3, 1,
+  4, 1,
+  5, 1,
+  6, 1,
+  7, 1,
+  8, 1,
+  9, 1,
+  10, 2,
+  11, 2,
+  12, 3,
+  13, 3,
+  14, 3,
+  15, 3,
+  16, 3,
+  17, 3,
+  18, 4,
+  20, 4,
+  21, 4,
+  22, 4,
+  23, 5,
+  24, 5,
+  25, 5,
+  26, 6,
+  27, 6,
+  28, 6,
+  29, 6,
+  30, 7,
+  31, 7,
+  32, 7,
+  33, 7,
+  34, 7,
+  35, 8,
+  36, 8,
+  37, 9,
+  38, 9,
+  39, 9,
+  40, 8,
+  41, 8,
+  42, 10,
+  43, 10,
+  44, 10,
+  48, NA
+), ncol = 2, byrow = TRUE)
+# Appliquer la reclassification sur le raster
+clc_grouped <- classify(clc_fr, recl)
+```
+
+On a donc changé les valeurs des pixels du raster, passant d'un code 1-44 (CLC) à un code 1-10 (groupes). Il faut maintenant changer les labels pour qu'ils correspondent aux groupes.
+
+```{r}
+#| eval: false
+# Créer une table de correspondance pour les groupes
+group_labels <- data.frame(
+  value = 1:10,
+  group_name = c(
+    "Milieux très anthropisés",
+    "Espaces verts urbains",
+    "Zones agricoles intensives",
+    "Zones agricoles semi-naturelles",
+    "Forêts",
+    "Milieux ouverts semi-naturels",
+    "Milieux extrêmes",
+    "Milieux humides continentaux",
+    "Milieux humides côtiers",
+    "Milieux marins"
+  )
+)
+# Associer ces labels au raster
+levels(clc_grouped) <- group_labels
+```
+
+On peut maintenant répéter les analyses réalisées précédemment sur les classes CLC2018_landcover.
+
+```{r}
+#| eval: false
+# Récupérer les valeurs de chaque pixel et compter leur fréquence
+clc_values <- values(clc_grouped)
+nclc_grouped <- table(clc_values)
+# Calculer la proportion du territoire métropolitain couverte par chaque classe CLC
+france_clc_grouped <- data.frame(
+  "landcover_groups"=group_labels$group_name[match(names(nclc_grouped), group_labels$value)],
+  "N_exp"=as.numeric(nclc_grouped),
+  "perc_exp"=round(as.numeric(nclc_grouped)/sum(nclc_grouped)*100,3)
+)
+# Stocker le résultat dans un CSV
+write.csv(france_clc_grouped, 
+  here::here(read_folder, "france_clc2018_100m_grouped.csv"), row.names=FALSE)
+```
+
+```{r}
+#| eval: false
+# Afficher le résultat
+clc_expected <- read.csv(file.path(read_folder, 
+                          "france_clc2018_100m_grouped.csv"))
+clc_expected <- as.data.table(france_clc_grouped)
+clc_expected <- clc_expected[order(-N_exp)]
+clc_expected |> datatable()
+```
+
+```{r}
+#| eval: false
+# Barplot
+ggplot(clc_expected) +
+  geom_col(aes(x = perc_exp, 
+               y = reorder(landcover_groups, N_exp)), fill = "darkorange") +
+  xlab("Part couverte du territoire de France métropole (%)") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+
+
+
+
+
+
+
+
+### Distribution observée des classes d'occupation des sols dans les données odonate
+
+```{r}
+#| eval: false
+# Création d'une nouvelle colonne de regroupement
+dat[, clc_group := fcase(
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
+  "Milieux fortement anthropisés",
+
+  CLC2018_landcover %in% c("Green urban areas", "Sport and leisure facilities"),
+  "Espaces verts urbains",
+
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Ricefields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  "Zones agricoles intensives",
+
+  CLC2018_landcover %in% c("Pastures", "Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
+  "Zones agricoles semi-naturelles",
+
+  CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
+  "Forêts",
+
+  CLC2018_landcover %in% c("Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
+  "Milieux ouverts semi-naturels",
+  
+  CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Milieux extrêmes",
+
+  CLC2018_landcover %in% c("Inland marshes", "Peatbogs", "Water courses", "Water bodies"),
+  "Milieux humides continentaux",
+  
+  CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
+  "Milieux humides côtiers",
+
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
+  "Milieux marins",
+
+  default = "Autres"
+)]
+```
