@@ -1,0 +1,149 @@
+---
+title: "analyses_popdensity_altitude"
+format:
+  html:
+    number-sections: true
+    embed-resources: true
+editor: visual
+---
+
+## Bibliothèques, chemins, chargement des données
+
+```{r}
+# Bibliothèques
+#| warning: false
+library(here)
+library(data.table)
+library(DT)
+library(ggplot2)
+library(rnaturalearth)
+library(dplyr)
+library(terra)
+library(sf)
+library(scales)
+library(effectsize)
+
+# Chemins
+read_folder <- here("data/03_grid")
+gisdata_folder <- here("data/gis")
+fig_folder <- here("figures/preprocessing")
+
+# Chargement et filtrage des données
+dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
+dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m)]
+```
+
+## Analyse du biais spatial d'échantillonnage lié à la densité de population
+
+### Données attendues
+
+```{r}
+# Chargement des données 
+pop_exp <- read.csv(file.path(read_folder, "pop_density.csv"), check.names = TRUE)
+# Les données sont agrégées, il faut créer un vecteur de données individuelles
+pop_exp_indiv <- rep(pop_exp$value, times = pop_exp$area)
+```
+
+```{r}
+# Visualisation
+ggplot(data.frame(pop = pop_exp_indiv), aes(x = pop)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Densité de population attendue (individuelle)",
+       x = "Densité (hab/km²)", y = "Nombre de pixels") +
+  theme_minimal()
+```
+
+```{r}
+pop_exp <- as.data.table(pop_exp)
+
+# Statistiques descriptives pondérées
+stats_pop_exp <- pop_exp[, .(
+  moy = weighted.mean(value, area),
+  med = value[which.max(cumsum(area) >= sum(area) / 2)],
+  sd = sqrt(weighted.mean((value - weighted.mean(value, area))^2, area))
+)]
+stats_pop_exp |> data.table()
+```
+
+```{r}
+# Normalité des données
+shapiro.test(sample(pop_exp_indiv, size = min(5000, length(pop_exp_indiv))))
+```
+
+La distribution de la densité de population attendue n'est pas normale (W = 0.29459, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+
+### Données observées
+
+```{r}
+# Visualisation
+ggplot(dat, aes(x = popdensity_hab_per_km2)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous(trans = "log1p") + 
+  labs(title = "Distribution de la densité de population observée",
+       x = "Densité (hab/km²)", y = "Nombre d'observations")
+ggplot(dat[popdensity_hab_per_km2 > 0], aes(x = popdensity_hab_per_km2)) +
+  geom_histogram(bins = 100, fill = "steelblue") +
+  scale_x_log10() +
+  labs(title = "Distribution de la densité de population (log-échelle)",
+       x = "Densité de population (log10)",
+       y = "Nombre d'occurrences") +
+  theme_minimal()
+```
+
+```{r}
+# Statistiques descriptives
+stats_pop_obs <- dat[, .(
+  moy_pop = mean(popdensity_hab_per_km2),
+  med_pop = median(popdensity_hab_per_km2),
+  sd_pop  = sd(popdensity_hab_per_km2)
+)]
+stats_pop_obs |> data.table()
+```
+
+```{r}
+# Normalité des données
+shapiro.test(sample(dat$popdensity_hab_per_km2, 5000))
+```
+
+Les données ne sont pas normales (W = 0.22949, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+
+### Comparaison des données observées et attendues (en attente)
+
+## Analyse du biais spatial d'échantillonnage lié à l'altitude
+
+### Données attendues (en attente)
+
+### Données observées
+
+Visualiser les données :
+
+```{r}
+ggplot(dat, aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "darkgreen", alpha = 0.7) +
+  labs(title = "Distribution de l'altitude observée",
+       x = "Altitude (m)", y = "Nombre d'observations")
+```
+
+Statistiques descriptives :
+
+```{r}
+# Moyenne et écart-type
+stats_alt <- dat[, .(
+  moy_alt = mean(elevation_m),
+  med_alt = median(elevation_m),
+  sd_alt  = sd(elevation_m)
+)]
+stats_alt |> data.table()
+```
+
+Normalité des données :
+
+```{r}
+# Test de Shapiro
+shapiro.test(sample(dat$elevation_m, 5000))
+```
+
+Les données ne sont pas normales (W = 0.72496, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+
+### Comparaison des données observées et attendues (en attente)

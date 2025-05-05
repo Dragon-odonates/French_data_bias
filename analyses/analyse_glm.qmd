@@ -1,0 +1,35 @@
+---
+title: "analyse_glm"
+format:
+  html:
+    number-sections: true
+    embed-resources: true
+editor: visual
+---
+
+## Bibliothèques, chemins, chargement des données
+
+```{r}
+# Bibliothèques
+#| warning: false
+library(here)
+library(data.table)
+library(DT)
+library(ggplot2)
+library(rnaturalearth)
+library(dplyr)
+library(terra)
+library(sf)
+library(scales)
+library(effectsize)
+
+# Chemins
+read_folder <- here("data/03_grid")
+gisdata_folder <- here("data/gis")
+fig_folder <- here("figures/preprocessing")
+
+# Chargement et filtrage des données
+dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
+dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m)]
+```
+

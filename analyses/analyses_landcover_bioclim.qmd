@@ -1,5 +1,5 @@
 ---
-title: "Analyses_1"
+title: "analyses_landcover_bioclim"
 format:
   html:
     number-sections: true
@@ -20,6 +20,7 @@ library(dplyr)
 library(terra)
 library(sf)
 library(scales)
+library(effectsize)
 
 read_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
@@ -103,14 +104,12 @@ write.csv(france_clc,
 ```
 
 ```{r}
+#Afficher le résultat
 clc_expected <- read.csv(file.path(read_folder, 
                           "france_clc2018_100m.csv"))
 clc_expected <- as.data.table(clc_expected)
 clc_expected <- clc_expected[order(-N_exp)]
 clc_expected |> datatable()
-```
-
-```{r}
 # Barplot
 ggplot(clc_expected) +
   geom_col(aes(x = N_exp, 
@@ -131,16 +130,13 @@ ggplot(clc_expected) +
 clc_observed <- dat[, .N, by = CLC2018_landcover][, perc_obs := round(N / sum(N) * 100, 2)][order(-N)]
 setnames(clc_observed, c("CLC2018_landcover", "N", "perc_obs"), c("CLC2018_landcover", "N_obs", "perc_obs"))
 clc_observed |> datatable()
-```
-
-```{r}
 # Barplot
 ggplot(clc_observed) +
-  geom_col(aes(x = N_obs, 
-               y = reorder(CLC2018_landcover, N_obs)), fill = "darkorange") +
-  xlab("Nombre d'occurrences") +
+  geom_col(aes(x = perc_obs, 
+               y = reorder(CLC2018_landcover, perc_obs)), fill = "darkorange") +
+  xlab("Proportion de chaque classe CLC dans les observations (%)") +
   scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
-  theme_minimal(base_size = 16) +
+  theme_minimal(base_size = 14) +
   theme(axis.title.y = element_blank(),
         panel.grid.major.y = element_blank(),
         axis.text.y = element_text(face = "italic",
@@ -153,11 +149,8 @@ On va maintenant produire des graphiques et tableaux comparatifs des 2 distribut
 
 ```{r}
 # Joindre les 2 distributions par les ID CLC
-clc_comp <- clc_observed[clc_expected, on = .(CLC2018_landcover)]
+clc_comp <- clc_observed[clc_expected, on = .(CLC2018_landcover)][!is.na(N_obs) & !is.na(N_exp) & N_obs != 0]
 clc_comp |> datatable()
-```
-
-```{r}
 # Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
 clc_long <- melt(clc_comp,
                  id.vars = "CLC2018_landcover",
@@ -178,29 +171,28 @@ ggplot(clc_long[!is.na(perc)], aes(x = reorder(CLC2018_landcover, perc),
 ```
 
 ```{r}
-# Filtrage des N/A
-clc_clean <- clc_comp[!is.na(N_obs) & !is.na(N_exp)]
-# Test du Khi²
-khi2 <- chisq.test(x = clc_clean$N_obs, 
-                        p = clc_clean$N_exp / sum(clc_clean$N_exp))
+# Test du Khi² de conformité 
+khi2 <- chisq.test(x = clc_comp$N_obs, 
+                        p = clc_comp$N_exp / sum(clc_comp$N_exp))
 khi2
+# Mesure de la taille de l'effet
+fei(khi2)
 ```
 
-p-value < 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
+Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 1377536 ou 1098122, df = 40, p \< 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale très faible voir nulle par rapport à la distribution théorique (FEI = 0.0062).
 
-### Contributions des classes au Khi² (méthode 2 : directement avec résidus)
-
-```{r}
-# Calcul de la contribution des classes au khi²
-clc_clean[, contrib_khi2 := (khi2$stdres)^2]
-clc_clean |> data.table()
-```
-
+### Contributions des classes au Khi²
 
 ```{r}
-# Visualiser les contributions en %
-clc_clean[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)]
-ggplot(clc_clean, aes(x = contrib_khi2_perc, 
+#Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
+scaling_factor <- sum(clc_comp$N_obs) / sum(clc_comp$N_exp)
+clc_comp[, N_exp_scaled := N_exp * scaling_factor]
+# Calcul de la contribution des classes au khi² (en %)
+clc_comp[, contrib_khi2 := (N_obs - N_exp_scaled)^2 / N_exp_scaled]
+clc_comp[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)][order(-contrib_khi2)]
+clc_comp |> data.table()
+# Visualiser les contributions
+ggplot(clc_comp, aes(x = contrib_khi2_perc, 
                       y = reorder(CLC2018_landcover, contrib_khi2_perc))) +
   geom_col(fill = "tomato") +
   labs(x = "Contribution au khi² (%)",
@@ -212,18 +204,18 @@ On voit donc quelles classes contribuent plus ou moins au khi², mais on voit bi
 
 ```{r}
 # Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
-clc_clean[, deviation := khi2$stdres]
-ggplot(clc_clean, aes(x = deviation, 
+clc_comp[, deviation := khi2$stdres]
+ggplot(clc_comp, aes(x = deviation, 
                       y = reorder(CLC2018_landcover, deviation))) +
   geom_col(aes(fill = deviation > 0)) +
   scale_fill_manual(values = c("steelblue", "tomato"), 
                     labels = c("Sous-représentée", "Sur-représentée")) +
   labs(x = "Résidu standardisé",
-       title = "Sur- ou sous-représentation des classes CLC (résidus)") +
+       title = "Sur- ou sous-représentation des classes CLC") +
   theme_minimal(base_size = 14)
 ```
 
-On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français.
+On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français. On va répéter cette analyse en agrégant les classes CLC en groupes plus lisibles pour présenter ces résultats.
 
 ## Etude du biais spatial d'occupation des sols (classes agrégées)
 
@@ -231,9 +223,9 @@ On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains
 
 **Reclassification** :
 
-1.1 + 1.2 + 1.3 Milieux fortement anthropisés
+https://land.copernicus.eu/content/corine-land-cover-nomenclature-guidelines/html/
 
-1.4 Espaces verts urbains
+1.1 + 1.2 + 1.3 + 1.4 Zones urbanisées et artificielles
 
 2.1 + 2.2 Zones agricoles intensives
 
@@ -253,18 +245,15 @@ On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains
 
 C'est avec ces groupes de classes qu'on va travailler à partir de maintenant.
 
-### Distribution attendue des groupes de classes d'occupation des sols 
+### Distribution attendue des groupes de classes d'occupation des sols
 
 ```{r}
 # Création d'une nouvelle colonne de regroupement dans clc_expected
 clc_expected[, landcover_groups := fcase(
-  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
-  "Milieux fortement anthropisés",
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites", "Green urban areas", "Sport and leisure facilities"),
+  "Zones urbanisées et artificielles",
 
-  CLC2018_landcover %in% c("Green urban areas", "Sport and leisure facilities"),
-  "Espaces verts urbains",
-
-  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Ricefields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Rice fields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
   "Zones agricoles intensives",
 
   CLC2018_landcover %in% c("Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
@@ -279,7 +268,7 @@ clc_expected[, landcover_groups := fcase(
   CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
   "Milieux extrêmes",
 
-  CLC2018_landcover %in% c("Inland marshes", "Peatbogs", "Water courses", "Water bodies"),
+  CLC2018_landcover %in% c("Inland marshes", "Peat bogs",  "Water courses", "Water bodies"),
   "Milieux humides continentaux",
   
   CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
@@ -288,18 +277,16 @@ clc_expected[, landcover_groups := fcase(
   CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
   "Milieux marins",
 
-  default = "Autres"
+  default = "NODATA"
 )]
-```
-```{r}
+clc_expected <- clc_expected[!is.na(CLC2018_landcover) & CLC2018_landcover != "NODATA"]
+
 # Agréger les effectifs par landcover_groups
 landcover_groups_expected <- clc_expected[, .(N_exp = sum(N_exp, na.rm = TRUE)), by = landcover_groups]
 # Calculer les perc_exp par groupe
 landcover_groups_expected[, perc_exp := 100 * N_exp / sum(N_exp)]
+# Afficher le résultat
 landcover_groups_expected |> datatable()
-```
-
-```{r}
 # Barplot
 ggplot(landcover_groups_expected) +
   geom_col(aes(x = N_exp, 
@@ -319,13 +306,10 @@ ggplot(landcover_groups_expected) +
 # Création d'une nouvelle colonne de regroupement dans dat
 dat <- as.data.table(dat)
 dat[, landcover_groups := fcase(
-  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites"),
-  "Milieux fortement anthropisés",
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites", "Green urban areas", "Sport and leisure facilities"),
+  "Zones urbanisées et artificielles",
 
-  CLC2018_landcover %in% c("Green urban areas", "Sport and leisure facilities"),
-  "Espaces verts urbains",
-
-  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Ricefields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Rice fields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
   "Zones agricoles intensives",
 
   CLC2018_landcover %in% c("Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
@@ -340,7 +324,7 @@ dat[, landcover_groups := fcase(
   CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
   "Milieux extrêmes",
 
-  CLC2018_landcover %in% c("Inland marshes", "Peatbogs", "Water courses", "Water bodies"),
+  CLC2018_landcover %in% c("Inland marshes", "Peat bogs",  "Water courses", "Water bodies"),
   "Milieux humides continentaux",
   
   CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
@@ -349,20 +333,16 @@ dat[, landcover_groups := fcase(
   CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
   "Milieux marins",
 
-  default = "Autres"
+  default = "NODATA"
 )]
-```
 
-```{r}
 # Agréger les effectifs par landcover_groups
 landcover_groups_observed <- dat[, .(N_obs = .N), by = landcover_groups]
 # Calculer les perc_obs par groupe
 landcover_groups_observed[, perc_obs := 100 * N_obs / sum(N_obs)]
 landcover_groups_observed <- landcover_groups_observed[order(-N_obs)]
 landcover_groups_observed |> datatable()
-```
 
-```{r}
 # Barplot
 ggplot(landcover_groups_observed) +
   geom_col(aes(x = N_obs, 
@@ -384,9 +364,6 @@ On va maintenant produire des graphiques et tableaux comparatifs des 2 distribut
 # Joindre les 2 distributions par les ID CLC
 landcover_groups_comp <- landcover_groups_observed[landcover_groups_expected, on = .(landcover_groups)]
 landcover_groups_comp |> datatable()
-```
-
-```{r}
 # Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
 lancover_groups_long <- melt(landcover_groups_comp,
                  id.vars = "landcover_groups",
@@ -406,54 +383,50 @@ ggplot(lancover_groups_long[!is.na(perc)], aes(x = reorder(landcover_groups, per
         legend.position = "top")
 ```
 
+Rq : Il serait pertinent pour des analyses ultérieures d'analyser la distribution du biais au sein des classes avec un fort biais observé.
+
 ```{r}
-# Filtrage des N/A
-landcover_groups_clean <- landcover_groups_comp[!is.na(N_obs) & !is.na(N_exp)]
-# Test du Khi²
-khi2_groups <- chisq.test(x = landcover_groups_clean$N_obs, 
-                        p = landcover_groups_clean$N_exp / sum(landcover_groups_clean$N_exp))
+# Test du Khi² de conformité 
+khi2_groups <- chisq.test(x = landcover_groups_comp$N_obs, 
+                        p = landcover_groups_comp$N_exp / sum(landcover_groups_comp$N_exp))
 khi2_groups
+# Mesure de la taille de l'effet
+fei(khi2_groups)
 ```
 
-p-value < 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
+Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 982169, df = 8, p \< 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale très faible voir nulle par rapport à la distribution théorique (FEI = 0.03).
 
-### Contributions des classes au Khi² (méthode 2 : directement avec résidus)
-
-```{r}
-# Calcul de la contribution des classes au khi²
-landcover_groups_clean[, contrib_khi2_groups := (khi2_groups$stdres)^2]
-landcover_groups_clean |> data.table()
-```
-
+### Contributions des classes au Khi²
 
 ```{r}
-# Visualiser les contributions en %
-landcover_groups_clean[, contrib_khi2_groups_perc := 100 * contrib_khi2_groups / sum(contrib_khi2_groups)]
-ggplot(landcover_groups_clean, aes(x = contrib_khi2_groups_perc, 
-                      y = reorder(landcover_groups, contrib_khi2_groups_perc))) +
+#Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
+scaling_factor <- sum(landcover_groups_comp$N_obs) / sum(landcover_groups_comp$N_exp)
+landcover_groups_comp[, N_exp_scaled := N_exp * scaling_factor]
+# Calcul de la contribution des classes au khi² (en %)
+landcover_groups_comp[, contrib_khi2 := (N_obs - N_exp_scaled)^2 / N_exp_scaled]
+landcover_groups_comp[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)][order(-contrib_khi2)]
+landcover_groups_comp |> data.table()
+# Visualiser les contributions
+ggplot(landcover_groups_comp, aes(x = contrib_khi2_perc, 
+                      y = reorder(landcover_groups, contrib_khi2_perc))) +
   geom_col(fill = "tomato") +
   labs(x = "Contribution au khi² (%)",
-       title = "Contribution de chaque classe landcover au test du khi²") +
+       title = "Contribution de chaque classe CLC au test du khi²") +
   theme_minimal(base_size = 14)
 ```
 
-On voit donc quelles classes contribuent plus ou moins au khi², mais on voit bien que certaines classes contribuent énormément (ex : Inland marshes, Waterbodies, etc) alors qu'elles représentent peu d'observations, un faible effort d'échantillonnage, alors que d'autres comme Non-irrigated arable lands représentent une très grande partie des observations mais pas la plus forte contribution au khi². A voir comment faire pour (et si c'est pertinent de) pondérer la contribution de chaque classe au biais avec le nombre d'observations.
-
 ```{r}
-# Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
-landcover_groups_clean[, deviation := khi2_groups$stdres]
-ggplot(landcover_groups_clean, aes(x = deviation, 
+# Quels groupes sont sur- ou sous-représentés dans les données ?
+landcover_groups_comp[, deviation := khi2_groups$stdres]
+ggplot(landcover_groups_comp, aes(x = deviation, 
                       y = reorder(landcover_groups, deviation))) +
   geom_col(aes(fill = deviation > 0)) +
   scale_fill_manual(values = c("steelblue", "tomato"), 
-                    labels = c("Sous-représentée", "Sur-représentée")) +
+                    labels = c("Sous-représenté", "Sur-représenté")) +
   labs(x = "Résidu standardisé",
-       title = "Sur- ou sous-représentation des classes landcover") +
+       title = "Sur- ou sous-représentation des groupes landcover") +
   theme_minimal(base_size = 14)
 ```
-
-On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français.
-Rq : on voit que la catégorie "Autres" a un poids important dans le khi², faut-il la retirer ?
 
 ## Etude du biais spatial des zones bioclimatiques
 
@@ -461,11 +434,11 @@ Rq : on voit que la catégorie "Autres" a un poids important dans le khi², faut
 
 Quelle proportion du territoire métropolitain est est couverte par chaque zone bioclimatique ?
 
-Données issues de Metzger et al. 2013 https://doi.org/10.1111/geb.12022 
+Données issues de Metzger et al. 2013 https://doi.org/10.1111/geb.12022
 
-- raster zones bioclimatiques mondiales (à cropper sur la France métropole) : https://datashare.ed.ac.uk/handle/10283/3089 
+-   raster zones bioclimatiques mondiales (à cropper sur la France métropole) : https://datashare.ed.ac.uk/handle/10283/3089
 
-- table de correspondance des zones bioclimatiques et leurs codes : fournie par Martin Jeanmougin (source ?)
+-   table de correspondance des zones bioclimatiques et leurs codes : fournie par Martin Jeanmougin (source ?)
 
 ```{r}
 #| eval: false
@@ -496,15 +469,12 @@ bioclim_exp <- read.csv(file.path(read_folder, "france_GEnS_v3.csv"))
 bioclim_exp <- as.data.table(bioclim_exp)
 gens_exp <- bioclim_exp[, .(N_exp = sum(count),
   perc_exp = round(sum(count) / sum(bioclim_exp$count) * 100, 3)), by = GEnZname][order(-N_exp)]
+setnames(gens_exp, "GEnZname", "GEnS_v3_bioclim") # pour plus tard
 gens_exp |> datatable()
-```
-Rq : Agréger les GEnS en GEnZname ?
-
-```{r}
 # Barplot
 ggplot(gens_exp) +
   geom_col(aes(x = perc_exp, 
-               y = reorder(GEnZname, perc_exp)), fill = "darkorange") +
+               y = reorder(GEnS_v3_bioclim, perc_exp)), fill = "darkorange") +
   xlab("Proportion du territoire occupée par chaque classe bioclimatique (%)") +
   scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
   theme_minimal(base_size = 16) +
@@ -518,14 +488,11 @@ ggplot(gens_exp) +
 
 ```{r}
 # Agréger les effectifs par GEnS_v3_bioclim
-gens_obs <- dat[, .(N_obs = .N), by = GEnS_v3_bioclim]
+gens_obs <- dat[, .(N_obs = .N), by = GEnS_v3_bioclim][!is.na(GEnS_v3_bioclim)]
 # Calculer les perc_obs par GEnS_v3_bioclim
 gens_obs[, perc_obs := 100 * N_obs / sum(N_obs)]
 gens_obs <- gens_obs[order(-N_obs)]
 gens_obs |> datatable()
-```
-
-```{r}
 # Barplot
 ggplot(gens_obs) +
   geom_col(aes(x = perc_obs, 
@@ -544,21 +511,11 @@ ggplot(gens_obs) +
 On va maintenant produire des graphiques et tableaux comparatifs des 2 distributions pour visualiser les biais, avant de tester statistiquement les différences de distribution des classes CLC.
 
 ```{r}
-# Avoir le même nom de variable pour les labels des zones bioclimatiques
-setnames(gens_exp, "GEnZname", "GEnS_v3_bioclim")
-names(gens_exp)
-```
-
-```{r}
 # Joindre les 2 distributions par les labels des zones bioclimatiques
-gens_comp <- gens_obs[gens_exp, on = .(GEnS_v3_bioclim)]
-gens_clean <- gens_comp[!is.na(perc_obs)]
-gens_clean |> datatable()
-```
-
-```{r}
+gens_comp <- gens_obs[gens_exp, on = .(GEnS_v3_bioclim)][!is.na(N_obs) & !is.na(N_exp) & N_obs != 0 & N_exp != 0]
+gens_comp |> datatable()
 # Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
-gens_long <- melt(gens_clean,
+gens_long <- melt(gens_comp,
                  id.vars = "GEnS_v3_bioclim",
                  measure.vars = c("perc_obs", "perc_exp"),
                  variable.name = "type",
@@ -577,43 +534,42 @@ ggplot(gens_long[!is.na(perc)], aes(x = reorder(GEnS_v3_bioclim, perc),
         legend.position = "top")
 ```
 
+Rq : probablement que la zone méditerranée est importante dans les données opportunistes (plus d'sp sous contraintes, peut-être plus de suivis dans ces zones là) = effet vacances ie odonatologues opportunistes font des suivis hors de leur zone d'origine.
+
 ```{r}
-# Filtrage des N/A
-gens_clean <- gens_clean[!is.na(N_obs) & !is.na(N_exp)]
-# Test du Khi²
-khi2_gens <- chisq.test(x = gens_clean$N_obs, 
-                        p = gens_clean$N_exp / sum(gens_clean$N_exp))
+# Test du Khi² de conformité 
+khi2_gens <- chisq.test(x = gens_comp$N_obs, 
+                        p = gens_comp$N_exp / sum(gens_comp$N_exp))
 khi2_gens
+# Mesure de la taille de l'effet
+fei(khi2_gens)
 ```
 
-p-value < 2.2e-16 : il y a un biais, certaines classes sont sur- ou sous-représentées.
+Le test du khi² de conformité indique une différence significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 85207, df = 7, p-value < 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale nulle par rapport à la distribution théorique (FEI = 0.00).
 
 ### Contributions des classes au Khi² (méthode 2 : directement avec résidus)
 
 ```{r}
-# Calcul de la contribution des zones bioclimatiques au khi²
-gens_clean[, contrib_khi2 := (khi2_gens$stdres)^2]
-gens_clean |> data.table()
-```
-
-```{r}
-# Contribution au total du khi² (%)
-gens_clean[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)]
-
-# Graphique
-ggplot(gens_clean, aes(x = contrib_khi2_perc, 
-                       y = reorder(GEnS_v3_bioclim, contrib_khi2_perc))) +
+#Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
+scaling_factor <- sum(gens_comp$N_obs) / sum(gens_comp$N_exp)
+gens_comp[, N_exp_scaled := N_exp * scaling_factor]
+# Calcul de la contribution des classes au khi² (en %)
+gens_comp[, contrib_khi2 := (N_obs - N_exp_scaled)^2 / N_exp_scaled]
+gens_comp[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)][order(-contrib_khi2)]
+gens_comp |> data.table()
+# Visualiser les contributions
+ggplot(gens_comp, aes(x = contrib_khi2_perc, 
+                      y = reorder(GEnS_v3_bioclim, contrib_khi2_perc))) +
   geom_col(fill = "tomato") +
   labs(x = "Contribution au khi² (%)",
-       title = "Contribution de chaque zone bioclimatique au test du khi²") +
+       title = "Contribution de chaque classe CLC au test du khi²") +
   theme_minimal(base_size = 14)
 ```
 
-
 ```{r}
-# Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ? (calcul de la déviation)
-gens_clean[, deviation := khi2_gens$stdres]
-ggplot(gens_clean, aes(x = deviation, 
+# Quelles zones sont sur- ou sous-représentées dans les données ?
+gens_comp[, deviation2 := khi2_gens$stdres]
+ggplot(gens_comp, aes(x = deviation, 
                        y = reorder(GEnS_v3_bioclim, deviation))) +
   geom_col(aes(fill = deviation > 0)) +
   scale_fill_manual(values = c("steelblue", "tomato"), 
@@ -622,27 +578,3 @@ ggplot(gens_clean, aes(x = deviation,
        title = "Sur- ou sous-représentation des zones bioclimatiques") +
   theme_minimal(base_size = 14)
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
