@@ -545,7 +545,7 @@ khi2_gens
 fei(khi2_gens)
 ```
 
-Le test du khi² de conformité indique une différence significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 85207, df = 7, p-value < 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale nulle par rapport à la distribution théorique (FEI = 0.00).
+Le test du khi² de conformité indique une différence significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 85207, df = 7, p-value \< 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale nulle par rapport à la distribution théorique (FEI = 0.00).
 
 ### Contributions des classes au Khi² (méthode 2 : directement avec résidus)
 

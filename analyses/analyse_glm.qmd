@@ -32,4 +32,3 @@ fig_folder <- here("figures/preprocessing")
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m)]
 ```
-
