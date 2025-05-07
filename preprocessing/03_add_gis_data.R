@@ -7,8 +7,6 @@
 #
 # Script Description: create shapefile and get gis information for each point
 
-
-
 # Libraries, parameters -----------------------------------------------------------
 library(terra)
 library(sf)
@@ -24,60 +22,65 @@ df_atlas <- readRDS(file.path(read_folder, "atlas.rds"))
 
 # Get the coordinates of all observations
 coocol <- c("decimalLongitude", "decimalLatitude")
-coo <- rbind(df_steli[,coocol], df_atlas[,coocol])
+coo <- rbind(df_steli[, coocol], df_atlas[, coocol])
 
 # to make faster extraction, select only unique coordinates
-coo <- coo[!duplicated(coo),]
+coo <- coo[!duplicated(coo), ]
+coo <- sf::st_set_geometry(coo, NULL)
 dim(coo) # 263427 unique coordinates
 
 # create vector spatial layer
 shp <- st_as_sf(coo, coords = coocol, crs = 4326)
 
-# Export shapefile, if needed 
+# Export shapefile, if needed
 # st_write(shp, here(data_folder,"shape_all.shp"), append=FALSE)
-
 
 # Get and extract GIS data ---------------------------------------
 
 # administrative regions -----------
 # from https://gadm.org/data.html
-gadm <- vect(here(extdata_folder,"gadm", "gadm41_FRA_2.shp"))
+gadm <- vect(here(extdata_folder, "gadm", "gadm41_FRA_2.shp"))
 gadm_points <- extract(gadm, vect(shp)) # take some time to compute
 # table(gadm_points$NAME_1, useNA="ifany")
-
 
 # elevation ------------
 # the best source of data ae EU scale is Copernicus GLO-30
 # https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM
 # imported from Google Earth Engine
 glo30 <- read.csv(here(data_folder, "gee_copdem_elevation.csv"))
-glo30 <- glo30[order(glo30$FID),]
+glo30 <- glo30[order(glo30$FID), ]
 # glo30$first[glo30$first<0] <- 0
 
-
 # Bioclimatic regions ---------
-# Metzger et al. 2013 https://doi.org/10.1111/geb.12022 
-gens <-  rast(here(data_folder, "eu_croped_gens_v3.tif"))
+# Metzger et al. 2013 https://doi.org/10.1111/geb.12022
+gens <- rast(here(data_folder, "eu_croped_gens_v3.tif"))
 meta_gens <- read.csv(here(data_folder, "GEnS_v3_classification.csv"))
 gens_points <- extract(gens, shp)
-gens_points$gens_name <- meta_gens$GEnZname[match(gens_points$eu_croped_gens_v3, meta_gens$GEnS_seq)]
+m_gens <- match(gens_points$eu_croped_gens_v3, meta_gens$GEnS_seq)
+gens_points$gens_name <- meta_gens$GEnZname[m_gens]
 
 
-# population density 2006 ---------
-# https://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761
-pop <-  rast(here(data_folder, "Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006.tif"))
-# get the vector in ETRS89_LAEA projection
-shp_3035 <- st_transform(shp, crs = crs(pop))
+# population density 2010 ---------
+# https://data.jrc.ec.europa.eu/dataset/2ff68a52-5b5b-4a22-8f40-c41da8332cfe
+pop <- rast(
+  here(data_folder, "GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
+)
+# get the vector in World_Mollweide projection
+shp_54009 <- st_transform(shp, crs = crs(pop))
 # extract the values of pop. density
-pop_points <- extract(pop, shp_3035)
-# NA means 0
-pop_points$Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006[is.na(pop_points$Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006)] <- 0
+pop_points <- extract(pop, shp_54009)
 
 
 # CORINE land cover 2018 -----------------
-# https://land.copernicus.eu/en/products/corine-land-cover/clc2018 
+# https://land.copernicus.eu/en/products/corine-land-cover/clc2018
 # with 100m resolution (but we could get Corine plus at 10m)
-clc <- rast(here(extdata_folder,"Corine", "u2018_clc2018_v2020_20u1_raster100m/DATA/U2018_CLC2018_V2020_20u1.tif"))
+clc <- rast(here(
+  extdata_folder,
+  "Corine",
+  "u2018_clc2018_v2020_20u1_raster100m/DATA/U2018_CLC2018_V2020_20u1.tif"
+))
+# get the vector in ETRS89_LAEA projection
+shp_3035 <- st_transform(shp, crs = crs(clc))
 # extract the values of land cover
 clc_points <- extract(clc, shp_3035)
 # table(clc_points$LABEL3)
@@ -86,16 +89,16 @@ clc_points <- extract(clc, shp_3035)
 coo_3035 <- st_coordinates(shp_3035)
 
 gis_info <- data.frame(
-  "longitude"=coo$decimalLongitude,
-  "latitude"=coo$decimalLatitude,
-  "x_ETRS89_LAEA"=coo_3035[,1],
-  "y_ETRS89_LAEA"=coo_3035[,2],
-  "region"=gadm_points$NAME_1,
-  "departement"=gadm_points$NAME_2,
-  "elevation_m"= glo30$first,
+  "longitude" = coo$decimalLongitude,
+  "latitude" = coo$decimalLatitude,
+  "x_ETRS89_LAEA" = coo_3035[, 1],
+  "y_ETRS89_LAEA" = coo_3035[, 2],
+  "region" = gadm_points$NAME_1,
+  "departement" = gadm_points$NAME_2,
+  "elevation_m" = glo30$first,
   "GEnS_v3_bioclim" = gens_points$gens_name,
-  "popdensity_hab_per_km2" = pop_points$Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006,
+  "popdensity_hab_per_km2" = pop_points$GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0,
   "CLC2018_landcover" = clc_points$LABEL3
 )
 
-write.csv(gis_info, here(read_folder, "gis_info.csv"), row.names=FALSE)
+write.csv(gis_info, here(read_folder, "gis_info.csv"), row.names = FALSE)
