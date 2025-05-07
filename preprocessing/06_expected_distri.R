@@ -79,17 +79,19 @@ write.csv(
 )
 
 
-# population density 2006 ---------
-# https://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761
-pop <- rast(here(data_folder, "Grid_ETRS89_LAEA_1K_ref_GEOSTAT_2006.tif"))
-npop <- table(values(pop))
+# population density 2010 ---------
+# https://data.jrc.ec.europa.eu/dataset/2ff68a52-5b5b-4a22-8f40-c41da8332cfe
+pop <- rast(
+  here(data_folder, "GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
+)
+npop <- table(values(pop), useNA = "ifany")
 pop_density <- data.frame(
-  value = names(npop),
+  value = as.numeric(names(npop)),
   area = as.numeric(npop),
   perc = as.numeric(npop) / sum(npop) * 100
 )
-pop_density <- pop_density[order(as.numeric(pop_density$value)), ]
-plot(pop_density$value, pop_density$perc)
+pop_density <- pop_density[order(pop_density$value), ]
+# plot(pop_density$value, pop_density$perc)
 write.csv(
   pop_density,
   here::here(read_folder, "pop_density.csv"),
