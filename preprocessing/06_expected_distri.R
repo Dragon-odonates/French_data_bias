@@ -84,17 +84,29 @@ write.csv(
 pop <- rast(
   here(data_folder, "GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
 )
-npop <- table(values(pop), useNA = "ifany")
+# project france borders
+fr_54009 <- project(fr, crs(pop))
+pop_fr <- crop(pop, fr_54009, mask = TRUE)
+
+# not sure if we want to log transform or not
+# extract the raw data first
+valpop <- values(pop_fr)
+
+# round the values with 6
+npop <- table(round(valpop, 6), useNA = "ifany")
 pop_density <- data.frame(
   value = as.numeric(names(npop)),
   area = as.numeric(npop),
   perc = as.numeric(npop) / sum(npop) * 100
 )
-pop_density <- pop_density[order(pop_density$value), ]
-# plot(pop_density$value, pop_density$perc)
+
+# same as
+# area_pop <- expanse(pop_fr, unit = "km", byValue = TRUE)
+# hist(log1p(valpop))
+# plot(pop_density$value + 1, pop_density$perc, log = "x", type = "l")
 write.csv(
   pop_density,
-  here::here(read_folder, "pop_density.csv"),
+  here::here(read_folder, "france_pop_density.csv"),
   row.names = FALSE
 )
 
@@ -119,6 +131,6 @@ fr_glo <- fr_glo[order(fr_glo$value), ]
 
 write.csv(
   fr_glo,
-  here::here(read_folder, "elevation_density.csv"),
+  here::here(read_folder, "france_elevation.csv"),
   row.names = FALSE
 )

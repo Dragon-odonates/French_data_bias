@@ -29,7 +29,6 @@ fig_folder <- here("figures/preprocessing")
 
 ```{r}
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
-table(dat$popdensity_hab_per_km2 == 0)
 dim(dat)
 str(dat)
 ```
