@@ -30,8 +30,10 @@ fig_folder <- here("figures/preprocessing")
 
 # Chargement et filtrage des données observées
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
-dat <- dat[!is.na(popdensity_hab_per_km2) & popdensity_hab_per_km2 >= 0 & !is.na(elevation_m) & elevation_m >= 0]
+dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m) & popdensity_hab_per_km2 >= 0 & elevation_m >= 0]
 ```
+
+Les données de densité de population sont tirées des estimations du Joint Research Centre (JRC) Data Catalogue, pour 2010, avec une résolution spatiale de 1 km. Les valeurs sont en nombre d'habitants par km².
 
 ```{r}
 # Visualiser les données observées
@@ -45,33 +47,16 @@ str(dat)
 ### Données attendues
 
 ```{r}
-# Chargement des données 
+# Chargement et filtrage des données 
 pop_exp <- read.csv(file.path(read_folder, "pop_density.csv"), check.names = TRUE)
-# Les données sont agrégées, créer un dt avec les données individuelles
+pop_exp <- pop_exp[!is.na(pop_exp$value) & pop_exp$value >= 0, ]
+pop_exp
+```
+```{r}
+# Les données sont agrégées, créer un dt vecteur avec les données individuelles
 pop_exp_indiv <- rep(pop_exp$value, times = pop_exp$area)
 pop_exp_dt <- data.table(pop = pop_exp_indiv)
-```
-
-```{r}
-# Visualisation
-ggplot(pop_exp_dt, aes(x = pop)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_continuous() +
-  labs(title = "Densité de population attendue",
-       x = "Densité (hab/km²)", y = "Nombre de pixels") +
-  theme_minimal()
-ggplot(pop_exp_dt, aes(x = pop)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_continuous(trans = "log1p") +
-  labs(title = "Densité de population attendue",
-       x = "Densité (hab/km²)", y = "Nombre de pixels") +
-  theme_minimal()
-ggplot(pop_exp_dt, aes(x = pop)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_log10() +
-  labs(title = "Densité de population attendue (log10)",
-       x = "Densité (hab/km²)", y = "Nombre de pixels") +
-  theme_minimal()
+length(pop_exp_indiv)
 ```
 
 ```{r}
@@ -86,6 +71,24 @@ pop_exp_stats <- pop_exp_dt[, .(
   sd     = sd(pop)
 )]
 pop_exp_stats |> data.table()
+# Visualisation
+ggplot(pop_exp_dt, aes(x = pop)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Densité de population attendue",
+       x = "Densité (hab/km²)", y = "Nombre de pixels") + xlim(-1,750) +
+  theme_minimal()
+ggplot(pop_exp_dt, aes(x = pop)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Densité de population attendue",
+       x = "Densité (hab/km²)", y = "Nombre de pixels") +
+  theme_minimal()
+ggplot(pop_exp_dt, aes(x = pop)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Densité de population attendue (log10)",
+       x = "Densité (hab/km²)", y = "Nombre de pixels") +
+  theme_minimal()
 ```
 
 ```{r}
@@ -108,11 +111,12 @@ qqnorm((sample_pop_exp), main = "QQ-plot (échantillon)")
 qqline((sample_pop_exp), col = "red", lwd = 2)
 ```
 
-La distribution de la densité de population attendue n'est pas normale (W = 0.29459, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+La distribution de la densité de population attendue n'est pas normale (W = 0.13128, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
 
 ```{r}
+#| eval: false
 # Transformation log1p
-log_pop_exp_dt <- data.table(log_pop = log1p(pop_exp_indiv))
+log_pop_exp_dt <- data.table(log_pop = log1p(pop_exp_dt$pop))
 # Test de Shapiro
 sample_pop_exp_log <- sample(log1p(pop_exp_indiv), 5000)
 shapiro.test(sample_pop_exp_log)
@@ -120,7 +124,7 @@ shapiro.test(sample_pop_exp_log)
 ggplot(log_pop_exp_dt, aes(x = log_pop)) +
   geom_histogram(aes(y = ..density..), bins = 100, fill = "steelblue", alpha = 0.6) +
   stat_function(fun = dnorm,
-                args = list(mean = mean(log_pop), sd = sd(log_pop)),
+                args = list(mean = mean(log_pop_exp_dt$log_pop), sd = sd(log_pop_exp_dt$log_pop)),
                 color = "red", size = 1) +
   labs(title = "Histogramme (log1p) de la densité de population attendue",
        x = "log(1 + densité hab/km²)", y = "Densité") +
@@ -135,12 +139,23 @@ La transformation log1p rapproche la distribution d'une loi normale, mais pas su
 ### Données observées
 
 ```{r}
+# Statistiques descriptives
+pop_obs_stats <- dat[, .(
+  min    = min(popdensity_hab_per_km2),
+  q1     = quantile(popdensity_hab_per_km2, 0.25),
+  median = median(popdensity_hab_per_km2),
+  mean   = mean(popdensity_hab_per_km2),
+  q3     = quantile(popdensity_hab_per_km2, 0.75),
+  max    = max(popdensity_hab_per_km2),
+  sd     = sd(popdensity_hab_per_km2)
+)]
+pop_obs_stats |> data.table()
 # Visualisation
 ggplot(dat, aes(x = popdensity_hab_per_km2)) +
   geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
   scale_x_continuous() + 
   labs(title = "Densité de population observée",
-       x = "Densité (hab/km²)", y = "Nombre d'observations")
+       x = "Densité (hab/km²)", y = "Nombre d'observations") + xlim(-1,750)
 ggplot(dat, aes(x = popdensity_hab_per_km2)) +
   geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
   scale_x_continuous(trans = "log1p") + 
@@ -153,20 +168,6 @@ ggplot(dat[popdensity_hab_per_km2 > 0], aes(x = popdensity_hab_per_km2)) +
        x = "Densité de population (log10)",
        y = "Nombre d'observations") +
   theme_minimal()
-```
-
-```{r}
-# Statistiques descriptives
-pop_obs_stats <- dat[, .(
-  min    = min(popdensity_hab_per_km2),
-  q1     = quantile(popdensity_hab_per_km2, 0.25),
-  median = median(popdensity_hab_per_km2),
-  mean   = mean(popdensity_hab_per_km2),
-  q3     = quantile(popdensity_hab_per_km2, 0.75),
-  max    = max(popdensity_hab_per_km2),
-  sd     = sd(popdensity_hab_per_km2)
-)]
-pop_obs_stats |> data.table()
 ```
 
 ```{r}
@@ -189,29 +190,30 @@ qqnorm((sample_pop_obs), main = "QQ-plot (échantillon)")
 qqline((sample_pop_obs), col = "red", lwd = 2)
 ```
 
-Les données ne sont pas normales (W = 0.22949, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+Les données ne sont pas normales (W = 0.24363, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
 
 ```{r}
+#| eval: false
 # Transformation log1p
-pop_obs_log_dt <- data.table(log_pop = log1p(dat[, popdensity_hab_per_km2]))
+log_pop_obs_dt <- data.table(log_pop = log1p(dat[, popdensity_hab_per_km2]))
 # Test de Shapiro
-sample_pop_obs_log <- sample(log_dat_dt[, log_pop], 5000)
-shapiro.test(sample_pop_obs_log)
+sample_log_pop_obs <- sample(log_pop_obs_dt[, log_pop], 5000)
+shapiro.test(sample_log_pop_obs)
 # Histogramme avec courbe densité normale
-ggplot(pop_obs_log_dt, aes(x = log_pop)) +
+ggplot(log_pop_obs_dt, aes(x = log_pop)) +
   geom_histogram(aes(y = ..density..), bins = 100, fill = "steelblue", alpha = 0.6) +
   stat_function(fun = dnorm,
-                args = list(mean = mean(log_pop), sd = sd(log_pop)),
+                args = list(mean = mean(log_pop_obs_dt$log_pop), sd = sd(log_pop_obs_dt$log_pop)),
                 color = "red", size = 1) +
   labs(title = "Histogramme (log1p) de la densité de population observée",
        x = "log(1 + densité hab/km²)", y = "Densité") +
   theme_minimal()
 # QQ-plot avec courbe de normalité
-qqnorm(sample_pop_obs_log, main = "QQ-plot log-transformé (log1p)")
-qqline(sample_pop_obs_log, col = "red", lwd = 2)
+qqnorm(sample_log_pop_obs, main = "QQ-plot log-transformé (log1p)")
+qqline(sample_log_pop_obs, col = "red", lwd = 2)
 ```
 
-Données toujours pas normales
+Données toujours pas normales après transformation log1p.
 
 ### Comparaison des données observées et attendues
 
@@ -234,7 +236,7 @@ ggplot(pop_comp, aes(x = pop, fill = source)) +
   geom_density(alpha = 0.5) +
   scale_x_continuous() +
   labs(title = "Distribution des densités de population",
-       x = "densité de population hab/km²)", y = "Densité") +
+       x = "densité de population hab/km²)", y = "Densité") + xlim(-1,750) +
   theme_minimal()
 ggplot(pop_comp, aes(x = pop, fill = source)) +
   geom_density(alpha = 0.5) +
@@ -250,22 +252,20 @@ ggplot(pop_comp[pop > 0], aes(x = pop, fill = source)) +
   theme_minimal()
 ```
 
-Avec log1p, on observe un pic à 0 dans les données obs par rapport à exp, est-ce que les 0 ont été filtré dans les données exp ou est-ce que ces données sont lissées (et donc pas de vrais zéros) ? Il disparaît à log10 puisqu'on filtre les O. 
+A garder dans le rapport : graphe log1p (pour l’analyse exploratoire) et log10 (pour comparer les queues des distributions).
 
 ```{r}
-# Tests de comparaison des médianes et distributions
-
-# Test de Wilcoxon (ou Mann-Whitney)
-wilcox.test(dat$popdensity_hab_per_km2, pop_exp_indiv)
 # Test de Kolmogorov-Smirnov
 ks.test(dat$popdensity_hab_per_km2, pop_exp_indiv)
+# Comparaison visuelle des distributions cumulées
+ggplot(pop_comp, aes(x = pop, color = source)) +
+  stat_ecdf(geom = "step") +
+  labs(title = "Fonctions de répartition cumulées (ECDF)",
+       x = "Densité de population (hab/km²))", y = "F(x)") + xlim(0,6000) +
+  theme_minimal()
 ```
 
-Il y a donc une différence significative entre les distributions de densité de populations observée et attendue, en termes de tendance centrale (W = 1.57e+12, p < 2.2e-16) et de forme générale (D = 0.26, p < 2.2e-16). Ceci confirme donc un biais spatial d'échantillonnage lié à la densité de population dans les données d'occurences d'odonates.
-
-Dans les données observées, il y a une légère surreprésentaion des zones plus densément peuplées (moy obs = 267.9, moy exp = 258.2) mais également une surreprésentation des zones très peu peuplées (méd obs = 19, méd exp = 30). Il y a donc une dispersion plus marquée du biais spatial observé (sd obs = 1064, sd exp = 984) qui peut refléter une hétérogénéité des comportements d'observation (zones urbaines, zones naturelles protégées).
-
-
+Il y a donc une différence significative de taille modérée entre les distributions de densité de populations observée et attendue (D = 0.15307, p < 2.2e-16). Ceci confirme donc un biais spatial d'échantillonnage lié à la densité de population dans les données d'occurences d'odonates. Dans les données observées, il y a une sur-représentaion des zones plus densément peuplées (moy obs = 254,1 hab/km², moy exp = 113,0 hab/km²) et une sous-représentation des zones peu densément peuplées (méd obs = 19, méd exp = 30).
 
 
 
@@ -288,28 +288,8 @@ alt_exp_dt <- data.table(alt = alt_exp_indiv)
 ```
 
 ```{r}
-# Visualisation
-ggplot(alt_exp_dt, aes(x = alt)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_continuous() +
-  labs(title = "Distribution attendue de l'altitude",
-       x = "Altitude (m)") +
-  theme_minimal()
-ggplot(alt_exp_dt, aes(x = alt)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_continuous(trans = "log1p") +
-  labs(title = "Distribution attendue de l'altitude",
-       x = "Altitude (m)") +
-  theme_minimal()
-ggplot(alt_exp_dt[alt > 0], aes(x = alt)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_log10() +
-  labs(title = "Distribution attendue de l'altitude",
-       x = "Altitude (m)") +
-  theme_minimal()
-```
+# Exploration des données
 
-```{r}
 # Statistiques descriptives
 alt_exp_stats <- alt_exp_dt[, .(
   min    = min(alt),
@@ -321,6 +301,26 @@ alt_exp_stats <- alt_exp_dt[, .(
   sd     = sd(alt)
 )]
 alt_exp_stats |> data.table()
+# Visualisation
+ggplot(alt_exp_dt, aes(x = alt)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous() +
+  labs(title = "Distribution attendue de l'altitude",
+       x = "Altitude (m)") +
+  theme_minimal()
+ggplot(alt_exp_dt[alt > 0], aes(x = alt)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution attendue de l'altitude",
+       x = "Altitude (m)") +
+  theme_minimal()
+ggplot(alt_exp_dt, aes(x = alt)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_y_log10() +
+  labs(title = "Distribution attendue de l'altitude (axe Y en log10)",
+       x = "Altitude (m)", y = "Nombre de pixels (log10)") +
+  theme_minimal()
+
 ```
 
 ```{r}
@@ -343,19 +343,22 @@ qqnorm(sample_alt_exp, main = "QQ-plot (échantillon)")
 qqline(sample_alt_exp, col = "red", lwd = 2)
 ```
 
+Pas normale comme on peut s'y attendre pour des données de densité de poop ou d'altitude tout simplement.
+
 La distribution de la densité de population attendue n'est pas normale (W = 0.68775, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
 
 ```{r}
+#| eval: false
 # Transformation log1p
-alt_exp_log_dt <- data.table(log_alt = log1p(alt_exp_indiv))
+log_alt_exp_dt <- data.table(log_alt = log1p(alt_exp_indiv))
 # Test de Shapiro
 sample_alt_exp_log <- sample(log1p(alt_exp_indiv), 5000)
 shapiro.test(sample_alt_exp_log)
 # Histogramme avec courbe densité normale
-ggplot(alt_exp_log_dt, aes(x = log_alt)) +
+ggplot(log_alt_exp_dt, aes(x = log_alt)) +
   geom_histogram(aes(y = ..density..), bins = 100, fill = "steelblue", alpha = 0.6) +
   stat_function(fun = dnorm,
-                args = list(mean = mean(log_alt_dt$log_alt), sd = sd(log_alt_dt$log_alt)),
+                args = list(mean = mean(log_alt_exp_dt$log_alt), sd = sd(log_alt_exp_dt$log_alt)),
                 color = "red", size = 1) +
   labs(title = "Histogramme (log1p) de l'altitude attendue",
        x = "log(1 + altitude en m)", y = "Densité") +
@@ -365,29 +368,9 @@ qqnorm(sample_alt_exp_log, main = "QQ-plot log-transformé (log1p)")
 qqline(sample_alt_exp_log, col = "red", lwd = 2)
 ```
 
-La transformation log1p rapproche la distribution d'une loi normale, mais pas suffisamment pour justifier l'utilisation de tests supposant la normalité.
+La transformation log1p rapproche la distribution d'une loi normale, mais pas suffisamment (graphiques) pour justifier l'utilisation de tests supposant la normalité.
 
 ### Données observées
-
-```{r}
-# Visualisation
-ggplot(dat, aes(x = elevation_m)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_continuous() + 
-  labs(title = "Altitude observée",
-       x = "Altitude (m)", y = "Nombre d'observations")
-ggplot(dat, aes(x = elevation_m)) +
-  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
-  scale_x_continuous(trans = "log1p") + 
-  labs(title = "Altitude observée (log1p)",
-       x = "Altitude (m)", y = "Nombre d'observations")
-ggplot(dat[elevation_m > 0], aes(x = elevation_m)) +
-  geom_histogram(bins = 100, fill = "steelblue") +
-  scale_x_log10() +
-  labs(title = "Altitude observée (log10)",
-       x = "Altitude (m)", y = "Nombre d'observations") +
-  theme_minimal()
-```
 
 ```{r}
 # Statistiques descriptives
@@ -401,6 +384,25 @@ alt_obs_stats <- dat[, .(
   sd     = sd(elevation_m)
 )]
 alt_obs_stats |> data.table()
+# Visualisation
+ggplot(dat, aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous() + 
+  labs(title = "Altitude observée",
+       x = "Altitude (m)", y = "Nombre d'observations") +
+  theme_minimal()
+ggplot(dat[elevation_m > 0], aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "steelblue") +
+  scale_x_log10() +
+  labs(title = "Altitude observée (log10)",
+       x = "Altitude (m)", y = "Nombre d'observations") +
+  theme_minimal()
+ggplot(dat, aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_y_log10() +
+  labs(title = "Distribution observée de l'altitude (axe Y en log10)",
+       x = "Altitude (m)", y = "Nombre d'observations (log10)") +
+  theme_minimal()
 ```
 
 ```{r}
@@ -423,9 +425,10 @@ qqnorm(sample_alt_obs, main = "QQ-plot (échantillon)")
 qqline(sample_alt_obs, col = "red", lwd = 2)
 ```
 
-Les données ne sont pas normales (W = 0.71238, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+Les données ne sont pas normales (W = 0.71893, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
 
 ```{r}
+#| eval: false
 # Transformation log1p
 alt_obs_log_dt <- data.table(log_alt = log1p(dat[, elevation_m]))
 # Test de Shapiro
@@ -484,14 +487,17 @@ ggplot(alt_comp[alt > 0], aes(x = alt, fill = source)) +
        x = "Altitude (m)", y = "Densité") +
   theme_minimal()
 ```
+zoomer un peu pour le rapport
 
 ```{r}
-# Tests de comparaison des médianes et distributions
-
-# Test de Wilcoxon (ou Mann-Whitney)
-wilcox.test(dat$elevation_m, alt_exp_indiv)
 # Test de Kolmogorov-Smirnov
 ks.test(dat$elevation_m, alt_exp_indiv)
+# Comparaison visuelle des distributions cumulées
+ggplot(pop_comp, aes(x = pop, color = source)) +
+  stat_ecdf(geom = "step") +
+  labs(title = "Fonctions de répartition cumulées (ECDF)",
+       x = "Altitude (m)", y = "F(x)") + xlim(0,6000) +
+  theme_minimal()
 ```
 
-Il y a donc une différence significative entre les distributions d'altitudes observée et attendue, en termes de tendance centrale (W = 4.62e+11, p < 2.2e-16) et de forme générale (D = 0.12, p < 2.2e-16). Ceci confirme donc un biais spatial d'échantillonnage lié à l'altitude dans les données d'occurences d'odonates.
+Il y a donc une différence significative de taille modérée entre les distributions d'altitude observée et attendue (D = 0.12, p < 2.2e-16). Ceci confirme donc un biais spatial d'échantillonnage lié à l'altitude dans les données d'occurences d'odonates. Les zones de haute altitude sont sous-échantillonnées tandis que les zones de basse altitude sont sur-échantillonnées.  

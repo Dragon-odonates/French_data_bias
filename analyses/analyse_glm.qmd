@@ -16,19 +16,293 @@ library(here)
 library(data.table)
 library(DT)
 library(ggplot2)
-library(rnaturalearth)
-library(dplyr)
-library(terra)
-library(sf)
-library(scales)
-library(effectsize)
+library(car)
+library(MASS)
+library(DHARMa)
 
 # Chemins
 read_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
 fig_folder <- here("figures/preprocessing")
 
-# Chargement et filtrage des données
-dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
-dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m)]
+# Chargement des données
+grille_data <- readRDS(file.path(read_folder, "dat_aggregated_10000.rds"))
+```
+
+```{r}
+# Visualiser les données observées
+#| eval: false
+dim(grille_data)
+str(grille_data)
+summary(grille_data)
+head(grille_data)
+```
+
+# GLM : Régression de Poisson de type régression linéaire
+
+Dans cette analyse, nous allons étudier la relation entre la variable réponse "nobs" (nombre d'observations) et les variables explicatives "popdensity_hab_per_km2" (densité moyenne de population), "elevation_m" (altitude moyenne) et "main_clc" (classe d'utilisation du sol majoritaire).
+
+## Visualisation des relations
+
+```{r}
+# Densité de population vs nobs
+ggplot(grille_data, aes(x = popdensity_hab_per_km2, y = nobs)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relation entre densité de population et nombre d'observations",
+       x = "Densité de population (hab/km²)", y = "Nombre d'observations")
+ggplot(grille_data, aes(x = log10(popdensity_hab_per_km2), y = nobs)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relation entre densité de population et nombre d'observations",
+       x = "Densité de population (hab/km²)", y = "Nombre d'observations")
+# Altitude vs nobs
+ggplot(grille_data, aes(x = elevation_m, y = nobs)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  labs(title = "Relation entre altitude et nombre d'observations",
+       x = "Altitude moyenne (m)", y = "Nombre d'observations")
+ggplot(grille_data, aes(x = log10(elevation_m), y = nobs)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  labs(title = "Relation entre altitude et nombre d'observations",
+       x = "Altitude moyenne (m)", y = "Nombre d'observations")
+# nobs selon la classe d'occupation du sol majoritaire
+ggplot(grille_data, aes(x = main_clc, y = nobs)) +
+  geom_boxplot(fill = "orange") +
+  labs(title = "Nombre d'observations selon l'occupation du sol",
+       x = "Classe d'occupation du sol", y = "Nombre d'observations") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Convertir la variables catégorielle clc en facteur
+
+```{r}
+# Convertir en facteur
+grille_data$main_clc <- as.factor(grille_data$main_clc)
+# Définir la modalité de référence
+grille_data$main_clc <- relevel(grille_data$main_clc, ref = "CLC_aquatic")
+levels(grille_data$main_clc)
+```
+
+On définit CLC_aquatic comme modalité de référence puisqu'on considère que c'est le milieu le plus propice aux odonates.
+
+## Ajustement du modèle de régression linéaire de Poisson
+
+```{r}
+mod.pois1 <- glm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = "poisson", data = grille_data)
+```
+
+## Evaluation des hypothèses de la régression de Poisson
+
+### 1 : Indépendance des réponses : les observations sont indépendantes, cette hypothèse est validée.
+
+### 2 : Distribution des réponses selon une loi de Poisson
+
+Pour vérifier cette hypothèse, on va comparer la distribution des valeurs observées de nobs avec leur distribution théorique selon la loi de Poisson de paramètre Lambda (estimé par la moyenne de nobs).
+
+```{r}
+# Moyenne des comptages observés
+mean(grille_data$nobs)
+# Simulation d’une distribution de Poisson théorique
+set.seed(1234)
+theoretic_count <- rpois(n = nrow(grille_data), lambda = mean(grille_data$nobs))
+tc_df <- data.frame(theoretic_count)
+# Comparaison visuelle des distributions
+ggplot(grille_data, aes(x = nobs)) +
+  geom_bar(fill = "#1E90FF") +
+  geom_bar(data = tc_df, aes(x = theoretic_count), fill = "red", alpha = 0.5) +
+  theme_classic() +
+  labs(title = "Comparaison des distributions observée et théorique (Poisson)",
+       x = "Nombre d'observations (nobs)",
+       y = "Fréquence") +
+  scale_x_continuous(limits = c(0, 3000)) +
+  theme(legend.position = "none")
+```
+
+On voit que les 2 distributions sont très différentes, nobs ne suit pas une loi de Poisson de paramètre lambda = 336.8712. On peut également voir une sur-représentation des valeurs zéro dans les comptages observés ; il est donc très probable qu’une surdispersion soit mise en évidence.
+
+### Evaluation de la surdispersion
+
+```{r}
+summary(mod.pois1)
+summary(mod.pois1)$deviance / summary(mod.pois1)$df.residual
+```
+
+Le ratio residual deviance / ddl est égal à 519.8077. Ce ratio est très largement supérieur à 1 et permet de mettre en évidence la présence d’une surdispersion massive. Le modèle de Poisson est fortement biaisé, il est donc nécessaire d’utiliser une autre structure d’erreur dans le modèle de régression.
+
+## Ajustement du modèle à une structure d'erreur différente
+
+### Structure d'erreur quasi-poisson
+
+```{r}
+mod.quasipois1 <- glm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = quasipoisson, data = grille_data)
+summary(mod.quasipois1)
+```
+
+Les estimateurs sont identiques à ceux du modèle de Poisson, Les erreurs standards sont plus grandes, le paramètre de dispersion estimé a augmenté (de 1 à 1137.969, il est énorme ça confirme une forte surdispersion), le modèle corrige les erreurs standards mais ne modifie pas les estimations.
+
+### Structure d'erreur binomiale négative
+
+```{r}
+mod.nb1 <- glm.nb(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = grille_data)
+summary(mod.nb1)
+```
+
+L'indice theta = 0.6974 confirme encore une fois une forte surdispersion. Le modèle donne des estimations légèrement différentes, il fournit un AIC (permet une comparaison plus tard) et il gère mieux la surdispersion (Residual deviance: 6919.0  on 5743 ddl). On retient ce modèle pour l'interprétation des résultats.
+
+## Vérification de la qualité de l'ajustement 
+
+```{r}
+# Diagnostics de résidus
+simu_res <- simulateResiduals(fittedModel = mod.nb1,n = 1000, plot = TRUE)
+# Test de surdisperion résiduelle
+testDispersion(simu_res)
+# Test d'inflation de zéros 
+testZeroInflation(simu_res)
+```
+
+Les résultats DHARMa montrent que le modèle n'est pas correctement ajusté (Graphique des résidus simulés). Il présente notamment une surdispersion résiduelle non expliquée (dispersion = 1.9535, p-value = 0.016), des zéros en excès dans les données (ratioObsSim = 0, p-value < 2.2e-16).
+
+On pourrait aussi réaliser un test d’autocorrélation spatiale ou un test d’effets non linéaires manquants.
+
+### Modèle ZINB
+
+```{r}
+library(glmmTMB)
+
+mod_zinb <- glmmTMB(
+  nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc,
+  ziformula = ~ main_clc + elevation_m,
+  family = nbinom2,
+  data = grille_data
+)
+summary(mod_zinb)
+
+simres_zinb <- simulateResiduals(mod_zinb)
+plot(simres_zinb)
+testDispersion(simres_zinb)
+testZeroInflation(simres_zinb)
+```
+
+Le modèle n'est pas ajusté, il faut explorer d'autres manières d'ajuster le modèle en trouvant d'éventuels problèmes à résoudre...
+
+### Vérification de la colinéarité des variables explicatives
+
+```{r}
+mod_lm <- lm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = grille_data)
+vif(mod_lm)
+cor(grille_data[, c("popdensity_hab_per_km2", "elevation_m")])
+```
+Pas de colinéarité.
+
+### Vérification de la présence de relations non linéaires dans le modèle
+
+```{r}
+# popdensity vs nobs (log-transformation testée aussi)
+ggplot(grille_data, aes(x = popdensity_hab_per_km2, y = nobs)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", color = "blue") +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Relation non linéaire entre densité de population et nobs",
+       x = "Densité de population (log1p)", y = "Nombre d'observations")
+# elevation vs nobs
+ggplot(grille_data, aes(x = elevation_m, y = nobs)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", color = "darkgreen") +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Relation non linéaire entre altitude et nobs",
+       x = "Altitude moyenne (log1p)", y = "Nombre d'observations")
+```
+
+Pas de forte non-linéarité évidente dans les relations univariées.
+
+### Ajouter un terme d'interaction ?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Tests posthocs (si nécessaires)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Interprétation des résultats
+
+On interprète les résultat du modèle binomial négatif qui modélise la fonction suivante : log(moy(nobs)) = beta_0 + beta_1 \* popdensity_hab_per_km2 + beta_2 \* elevation_m + beta_3 \* main_clc + beta_4 \* main_bioclim
+
+> popdensity_hab_per_km2 : Lorsqu’une maille gagne 1 habitant par km², le nombre moyen d’observations augmente d’environ 0,03 %.
+
+> elevation_m : Chaque mètre supplémentaire d'altitude entraîne une diminution moyenne de 0,03 % du nombre d’observations.
+
+
+
+Discussion : la proportion d'hab explique partiellement l'urbanisation donc les 2 variables sont liées ? 
+faire un graph de densité de pop en fonction de clc. Même pour altitude, vérifier la corrélation entre les variables, graph ? test? terme d'interaction (interaction des effets entre 2 var explicatives) ? En tout cas en discuter pour l'interprétation des résultats
+
+Est-ce qu'on passe les variables en log ? 
+
+Tests à posteriori à chercher et réaliser (checker package dharrma), normalité des résidus etc
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## On va transformer des variables explicatives pour voir si on peut améliorer l'ajustement du modèle (choix basé sur l'AIC)
+
+```{r}
+# Ajout des variables transformées dans le dataset
+grille_data$log_popdensity <- log1p(grille_data$popdensity_hab_per_km2)
+grille_data$log_elevation <- log1p(grille_data$elevation_m)
+# Réajuster un modèle de Poisson avec les variables en log
+mod.pois2 <- glm(nobs ~ log_popdensity + log_elevation + main_clc + main_bioclim,
+                 family = poisson(link = "log"),
+                 data = grille_data)
+summary(mod.pois2)
 ```
