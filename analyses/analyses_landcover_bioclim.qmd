@@ -36,32 +36,15 @@ dim(dat)
 str(dat)
 ```
 
-| Variable | Description |
-|:-----------------------------------|:-----------------------------------|
-| scientificName | latin name of the observed taxa |
-| family | family name of the observed taxa |
-| occurrenceID | ID of the occurence event (unique ID of the row) |
-| eventDate | date of the observation |
-| recordedBy | name of the observer |
-| decimalLongitude | longitude in decimal degree (WGS84) |
-| decimalLatitude | latitude in decimal degree (WGS84) |
-| municipality | municipality of the observation |
-| verbatimName | full name of the species, including reference |
-| genus | genus of the taxa |
-| taxonRank | rank of the taxa |
-| taxonID | ID of the taxa (from GBIF) |
-| id_1000 | ID of the grid cell at 1km resolution |
-| id_5000 | ID of the grid cell at 5km resolution |
-| id_10000 | ID of the grid cell at 10km resolution |
-| source | database of origin (steli or atlas) |
-| x_ETRS89_LAEA | longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
-| y_ETRS89_LAEA | latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
-| region | administrative region of the observation |
-| departement | administrative department of the observation |
-| elevation_m | elevation (in m), from [Copernicus GLO-30 dataset](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) |
-| GEnS_v3_bioclim | bioclimatic region, from [Metzger et al. 2013](https://doi.org/10.1111/geb.12022) |
-| popdensity_hab_per_km2 | population density in 2006 from [EEA Geostat data](ttps://www.eea.europa.eu/en/datahub/datahubitem-view/5884f314-84a9-4f53-a745-d94d7a53e8b1?activeAccordion=1083668%2C761) |
-| CLC2018_landcover | [Corine land cover class](https://land.copernicus.eu/en/products/corine-land-cover/clc2018) of 2018 with spatial resolution of 100m |
+```{r}
+# Filtrage des données entre 1990 et 2020 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2020-12-31")]
+
+# Vérification
+dim(dat)
+summary(dat$eventDate)
+```
+
 
 ## Etude du biais spatial d'occupation des sols (CLC2018_landcover)
 
@@ -210,13 +193,11 @@ ggplot(clc_comp, aes(x = deviation,
   theme_minimal(base_size = 14)
 ```
 
-On voit donc quelles classes contribuent plus ou moins au khi², mais on voit bien que certaines classes contribuent énormément (ex : Inland marshes, Waterbodies, etc) alors qu'elles représentent peu d'observations, un faible effort d'échantillonnage, alors que d'autres comme Non-irrigated arable lands représentent une très grande partie des observations mais pas la plus forte contribution au khi². A voir comment faire pour (et si c'est pertinent de) pondérer la contribution de chaque classe au biais avec le nombre d'observations.
-
-On voit donc qu'il y a de forts biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français. On va répéter cette analyse en agrégant les classes CLC en groupes plus lisibles pour présenter ces résultats.
+On voit donc qu'il y a des biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français. On va répéter cette analyse en agrégant les classes CLC en groupes plus lisibles pour présenter ces résultats.
 
 ## Etude du biais spatial d'occupation des sols (classes agrégées)
 
-### Agrégation des classes CLC (méthode 1 : sur le data.table)
+### Agrégation des classes CLC 
 
 Pour le regroupement des classes clc, se référer à la page : 
 https://land.copernicus.eu/content/corine-land-cover-nomenclature-guidelines/html/
@@ -393,11 +374,33 @@ ggplot(landcover_groups_comp, aes(x = deviation,
   theme_minimal(base_size = 14)
 ```
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## Etude du biais spatial des zones bioclimatiques
 
 ### Distribution attendue
 
-Quelle proportion du territoire métropolitain est est couverte par chaque zone bioclimatique ?
+Quelle proportion du territoire métropolitain est couverte par chaque zone bioclimatique ?
 
 Données issues de Metzger et al. 2013 https://doi.org/10.1111/geb.12022
 

@@ -31,6 +31,8 @@ fig_folder <- here("figures/preprocessing")
 # Chargement et filtrage des données observées
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m) & popdensity_hab_per_km2 >= 0 & elevation_m >= 0]
+# Filtrage des données entre 1990 et 2020 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2020-12-31")]
 ```
 
 Les données de densité de population sont tirées des estimations du Joint Research Centre (JRC) Data Catalogue, pour 2010, avec une résolution spatiale de 1 km. Les valeurs sont en nombre d'habitants par km².

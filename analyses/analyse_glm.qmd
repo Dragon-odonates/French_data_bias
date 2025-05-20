@@ -21,7 +21,7 @@ library(MASS)
 library(DHARMa)
 
 # Chemins
-read_folder <- here("data/03_grid")
+read_folder <- here("data/04_aggregate_by_grid")
 gisdata_folder <- here("data/gis")
 fig_folder <- here("figures/preprocessing")
 
@@ -217,22 +217,6 @@ ggplot(grille_data, aes(x = elevation_m, y = nobs)) +
 
 Pas de forte non-linéarité évidente dans les relations univariées.
 
-### Ajouter un terme d'interaction ?
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Tests posthocs (si nécessaires)
 
 
@@ -268,9 +252,6 @@ Pas de forte non-linéarité évidente dans les relations univariées.
 
 On interprète les résultat du modèle binomial négatif qui modélise la fonction suivante : log(moy(nobs)) = beta_0 + beta_1 \* popdensity_hab_per_km2 + beta_2 \* elevation_m + beta_3 \* main_clc + beta_4 \* main_bioclim
 
-> popdensity_hab_per_km2 : Lorsqu’une maille gagne 1 habitant par km², le nombre moyen d’observations augmente d’environ 0,03 %.
-
-> elevation_m : Chaque mètre supplémentaire d'altitude entraîne une diminution moyenne de 0,03 % du nombre d’observations.
 
 
 
@@ -294,15 +275,5 @@ Tests à posteriori à chercher et réaliser (checker package dharrma), normalit
 
 
 
-## On va transformer des variables explicatives pour voir si on peut améliorer l'ajustement du modèle (choix basé sur l'AIC)
+## Transformation de variables explicatives et comparaison de modèles basée sur l'AIC
 
-```{r}
-# Ajout des variables transformées dans le dataset
-grille_data$log_popdensity <- log1p(grille_data$popdensity_hab_per_km2)
-grille_data$log_elevation <- log1p(grille_data$elevation_m)
-# Réajuster un modèle de Poisson avec les variables en log
-mod.pois2 <- glm(nobs ~ log_popdensity + log_elevation + main_clc + main_bioclim,
-                 family = poisson(link = "log"),
-                 data = grille_data)
-summary(mod.pois2)
-```

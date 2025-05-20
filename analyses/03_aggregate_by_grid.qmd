@@ -30,6 +30,9 @@ write_folder <- here("data/04_aggregate_by_grid")
 
 ```{r}
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
+# Filtrage des données entre 1990 et 2020 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2020-12-31")]
+summary(dat$eventDate)
 ```
 
 ## Convert landcover groups
@@ -51,17 +54,11 @@ dat[, landcover_groups := fcase(
   CLC2018_landcover %in% c("Pastures", "Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
   "Milieux ouverts semi-naturels",
   
-  CLC2018_landcover %in% c("Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
-  "Milieux extrêmes",
-
-  CLC2018_landcover %in% c("Inland marshes", "Peat bogs",  "Water courses", "Water bodies"),
-  "Milieux humides continentaux",
+  CLC2018_landcover %in% c("Inland marshes", "Peat bogs",  "Water courses", "Water bodies", "Salt marshes", "Salines", "Intertidal flats"),
+  "Milieux aquatiques",
   
-  CLC2018_landcover %in% c("Salt marshes", "Salines", "Intertidal flats"),
-  "Milieux humides côtiers",
-
-  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean"),
-  "Milieux marins",
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean", "Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Autres",
 
   default = "NODATA"
 )]
@@ -82,14 +79,8 @@ dat[, CLC_names := fcase(
   "CLC_forest",
   landcover_groups == "Milieux ouverts semi-naturels",
   "CLC_open_seminat",
-  landcover_groups == "Milieux extrêmes",
-  "CLC_extreme",
-  landcover_groups == "Milieux humides continentaux",
-  "CLC_wetlands_inland",
-  landcover_groups == "Milieux humides côtiers",
-  "CLC_wetlants_coast",
-  landcover_groups == "Milieux marins",
-  "CLC_marine"
+  landcover_groups == "Milieux aquatiques",
+  "CLC_aquatic"
 )]
 
 dat[, bioclim_names := fcase(
