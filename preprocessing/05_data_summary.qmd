@@ -29,6 +29,9 @@ fig_folder <- here("figures/preprocessing")
 
 ```{r}
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
+# Filtrage des données entre 1990 et 2018 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-31")]
+
 dim(dat)
 str(dat)
 ```
@@ -160,7 +163,7 @@ grid <- readRDS(file.path(read_folder, "grid_scale_10000.rds"))
 ```{r}
 # Sumarize with grid
 nobs <- st_drop_geometry(dat) |>
-  group_by(id_10000, source) |>
+  group_by(id_10000) |>
   summarize(nobs = n(), .groups = "drop")
 
 nobs_grid <- grid |>
@@ -172,7 +175,6 @@ nobs_grid <- grid |>
 ggplot() +
   geom_sf(data = fr_3035) +
   geom_sf(data = nobs_grid, aes(fill = nobs), color = "transparent") +
-  facet_grid(cols = vars(source)) +
   xlim(bbox$xmin, bbox$xmax) +
   ylim(bbox$ymin, bbox$ymax) +
   scale_fill_viridis_c(
@@ -182,7 +184,13 @@ ggplot() +
     name = "Occurrences"
   ) +
   theme_void(base_size = 30) +
-  theme(legend.position = "left", legend.key.height = unit(1, "cm"))
+  theme(
+    legend.position = "left",
+    legend.key.height = unit(1, "cm"),      # Hauteur des cases de légende
+    legend.key.width  = unit(1, "cm"),      # Largeur des cases
+    legend.text = element_text(size = 16),    # Taille du texte
+    legend.title = element_text(size = 20)    # Taille du titre
+  )
 
 ggsave(file.path(fig_folder, "map.png"), width = 8, height = 6, dpi = 300)
 ```

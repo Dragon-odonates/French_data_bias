@@ -30,8 +30,8 @@ write_folder <- here("data/04_aggregate_by_grid")
 
 ```{r}
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
-# Filtrage des données entre 1990 et 2020 inclus
-dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2020-12-31")]
+# Filtrage des données entre 1990 et 2018 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-31")]
 summary(dat$eventDate)
 ```
 

@@ -15,15 +15,22 @@ editor: visual
 library(here)
 library(data.table)
 library(DT)
+library(dplyr)
 library(ggplot2)
+
 library(car)
 library(MASS)
 library(DHARMa)
 
+library(gtsummary)
+library(gt)
+library(broom)
+library(flextable)
+
 # Chemins
 read_folder <- here("data/04_aggregate_by_grid")
 gisdata_folder <- here("data/gis")
-fig_folder <- here("figures/preprocessing")
+fig_folder <- here("figures/rapport_stage_M1_TMP")
 
 # Chargement des données
 grille_data <- readRDS(file.path(read_folder, "dat_aggregated_10000.rds"))
@@ -55,7 +62,7 @@ ggplot(grille_data, aes(x = log10(popdensity_hab_per_km2), y = nobs)) +
   geom_point() +
   geom_smooth(method = "lm", se = TRUE, color = "blue") +
   labs(title = "Relation entre densité de population et nombre d'observations",
-       x = "Densité de population (hab/km²)", y = "Nombre d'observations")
+       x = "log10(Densité de population)", y = "Nombre d'observations")
 # Altitude vs nobs
 ggplot(grille_data, aes(x = elevation_m, y = nobs)) +
   geom_point() +
@@ -66,7 +73,7 @@ ggplot(grille_data, aes(x = log10(elevation_m), y = nobs)) +
   geom_point() +
   geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
   labs(title = "Relation entre altitude et nombre d'observations",
-       x = "Altitude moyenne (m)", y = "Nombre d'observations")
+       x = "log10(Altitude moyenne)", y = "Nombre d'observations")
 # nobs selon la classe d'occupation du sol majoritaire
 ggplot(grille_data, aes(x = main_clc, y = nobs)) +
   geom_boxplot(fill = "orange") +
@@ -75,12 +82,12 @@ ggplot(grille_data, aes(x = main_clc, y = nobs)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-## Convertir la variables catégorielle clc en facteur
+## Convertir la variable catégorielle clc en facteur
 
 ```{r}
 # Convertir en facteur
 grille_data$main_clc <- as.factor(grille_data$main_clc)
-# Définir la modalité de référence
+# Définir la modalité de référence = CLC_aquatic
 grille_data$main_clc <- relevel(grille_data$main_clc, ref = "CLC_aquatic")
 levels(grille_data$main_clc)
 ```
@@ -90,7 +97,7 @@ On définit CLC_aquatic comme modalité de référence puisqu'on considère que 
 ## Ajustement du modèle de régression linéaire de Poisson
 
 ```{r}
-mod.pois1 <- glm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = "poisson", data = grille_data)
+mod.pois <- glm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = "poisson", data = grille_data)
 ```
 
 ## Evaluation des hypothèses de la régression de Poisson
@@ -120,72 +127,60 @@ ggplot(grille_data, aes(x = nobs)) +
   theme(legend.position = "none")
 ```
 
-On voit que les 2 distributions sont très différentes, nobs ne suit pas une loi de Poisson de paramètre lambda = 336.8712. On peut également voir une sur-représentation des valeurs zéro dans les comptages observés ; il est donc très probable qu’une surdispersion soit mise en évidence.
+On voit que les 2 distributions sont très différentes, nobs ne suit pas une loi de Poisson de paramètre lambda = 275.2578 On peut également voir une sur-représentation des valeurs zéro dans les comptages observés ; il est donc très probable qu’une surdispersion soit mise en évidence.
 
 ### Evaluation de la surdispersion
 
 ```{r}
-summary(mod.pois1)
-summary(mod.pois1)$deviance / summary(mod.pois1)$df.residual
+summary(mod.pois)
+summary(mod.pois)$deviance / summary(mod.pois)$df.residual
 ```
 
-Le ratio residual deviance / ddl est égal à 519.8077. Ce ratio est très largement supérieur à 1 et permet de mettre en évidence la présence d’une surdispersion massive. Le modèle de Poisson est fortement biaisé, il est donc nécessaire d’utiliser une autre structure d’erreur dans le modèle de régression.
+Le ratio residual deviance / ddl est égal à 468.8812. Ce ratio est très largement supérieur à 1 et permet de mettre en évidence la présence d’une surdispersion massive. Le modèle de Poisson est fortement biaisé, il est donc nécessaire d’utiliser une autre structure d’erreur dans le modèle de régression.
 
 ## Ajustement du modèle à une structure d'erreur différente
 
 ### Structure d'erreur quasi-poisson
 
 ```{r}
-mod.quasipois1 <- glm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = quasipoisson, data = grille_data)
-summary(mod.quasipois1)
+mod.quasipois <- glm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = quasipoisson, data = grille_data)
+summary(mod.quasipois)
 ```
 
-Les estimateurs sont identiques à ceux du modèle de Poisson, Les erreurs standards sont plus grandes, le paramètre de dispersion estimé a augmenté (de 1 à 1137.969, il est énorme ça confirme une forte surdispersion), le modèle corrige les erreurs standards mais ne modifie pas les estimations.
+Les estimateurs sont identiques à ceux du modèle de Poisson, les erreurs standards sont plus grandes, le paramètre de dispersion estimé a augmenté (de 1 à 1137.969, il est énorme ça confirme une forte surdispersion), le modèle corrige les erreurs standards mais ne modifie pas les estimations.
 
 ### Structure d'erreur binomiale négative
 
 ```{r}
-mod.nb1 <- glm.nb(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = grille_data)
-summary(mod.nb1)
+grille_data$popdensity <- grille_data$popdensity_hab_per_km2 / 500
+grille_data$elevation <- grille_data$elevation_m / 500
 ```
 
-L'indice theta = 0.6974 confirme encore une fois une forte surdispersion. Le modèle donne des estimations légèrement différentes, il fournit un AIC (permet une comparaison plus tard) et il gère mieux la surdispersion (Residual deviance: 6919.0  on 5743 ddl). On retient ce modèle pour l'interprétation des résultats.
 
-## Vérification de la qualité de l'ajustement 
+```{r}
+mod.nb <- glm.nb(nobs ~ popdensity + elevation + main_clc, data = grille_data)
+summary(mod.nb)
+summary(mod.nb)$deviance / summary(mod.nb)$df.residual
+```
+
+L'indice theta = 0.6974 confirme encore une fois une forte surdispersion. Le modèle donne des estimations légèrement différentes, il fournit un AIC (permet une éventuelle comparaison plus tard) et il gère mieux la surdispersion (paramètre de dispersion proche de 1 : 1.217844). On retient ce modèle pour l'interprétation des résultats.
+
+## Vérification de la qualité de l'ajustement
 
 ```{r}
 # Diagnostics de résidus
-simu_res <- simulateResiduals(fittedModel = mod.nb1,n = 1000, plot = TRUE)
+simu_res <- simulateResiduals(fittedModel = mod.nb,n = 1000, plot = TRUE)
 # Test de surdisperion résiduelle
 testDispersion(simu_res)
 # Test d'inflation de zéros 
-testZeroInflation(simu_res)
+testOutliers(simu_res, type = "bootstrap")
 ```
 
-Les résultats DHARMa montrent que le modèle n'est pas correctement ajusté (Graphique des résidus simulés). Il présente notamment une surdispersion résiduelle non expliquée (dispersion = 1.9535, p-value = 0.016), des zéros en excès dans les données (ratioObsSim = 0, p-value < 2.2e-16).
+Les tests du diagnostic DHARMa sont significatifs, ils indiquent une légère surdispersion résiduelle (dispersion = 1.9567, p-value = 0.032) et moins de 1% de valeurs aberrantes (outliers at both margins = 53 / 5701 = 0,0093 ; p \< 2.2e-16).
 
-On pourrait aussi réaliser un test d’autocorrélation spatiale ou un test d’effets non linéaires manquants.
+La taille de l'échantillon augmente la sensibilité des tests, il vaut donc mieux se fier à l'interprétation visuelle. La distribution observée des résidus suit leur distribution attendue sans déviation majeure (QQ plot residuals), et il ne semble pas y avoir d’effet non-modélisé ou de non-linéarité claire (DHARMa residual vs. predicted).
 
-### Modèle ZINB
-
-```{r}
-library(glmmTMB)
-
-mod_zinb <- glmmTMB(
-  nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc,
-  ziformula = ~ main_clc + elevation_m,
-  family = nbinom2,
-  data = grille_data
-)
-summary(mod_zinb)
-
-simres_zinb <- simulateResiduals(mod_zinb)
-plot(simres_zinb)
-testDispersion(simres_zinb)
-testZeroInflation(simres_zinb)
-```
-
-Le modèle n'est pas ajusté, il faut explorer d'autres manières d'ajuster le modèle en trouvant d'éventuels problèmes à résoudre...
+Pour approfondir l'étude de l'ajustement du modèle, on pourrait aussi réaliser un test d’autocorrélation spatiale, un test d’effets non linéaires manquants, un test de colinéarité des variables, etc.
 
 ### Vérification de la colinéarité des variables explicatives
 
@@ -194,12 +189,13 @@ mod_lm <- lm(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = gril
 vif(mod_lm)
 cor(grille_data[, c("popdensity_hab_per_km2", "elevation_m")])
 ```
-Pas de colinéarité.
+
+Il ne semble pas y avoir de colinéarité des variables.
 
 ### Vérification de la présence de relations non linéaires dans le modèle
 
 ```{r}
-# popdensity vs nobs (log-transformation testée aussi)
+# popdensity vs nobs 
 ggplot(grille_data, aes(x = popdensity_hab_per_km2, y = nobs)) +
   geom_point(alpha = 0.3) +
   geom_smooth(method = "loess", color = "blue") +
@@ -215,65 +211,55 @@ ggplot(grille_data, aes(x = elevation_m, y = nobs)) +
        x = "Altitude moyenne (log1p)", y = "Nombre d'observations")
 ```
 
-Pas de forte non-linéarité évidente dans les relations univariées.
+Il ne semble pas non plus y avoir de forte non-linéarité évidente dans les relations univariées.
 
-## Tests posthocs (si nécessaires)
+Par soucis de temps, on ne va pas pousser la démarche d'ajustement du modèle plus loin. On pourrait tester des modèles ayant des structures d'erreur différentes (ZINB, zero-inflated, etc) ou tester des transformations de variables, le tout en comparant les différents modèles à l'aide des AIC pour affiner l'ajustement du modèle. On considère que le modèle binomial négatif est correctement ajusté pour cette analyse.
 
+## Interprétation des résultats du modèle binomial négatif
 
+```{r}
+tbl <- mod.nb |> gtsummary::tbl_regression(exponentiate = TRUE, intercept = TRUE)
+flextable::save_as_docx(
+  as_flex_table(tbl),
+  path = here("figures/rapport_stage_M1_TMP", "tableau_glm.docx")
+)
+```
 
+```{r}
+# Extraire les résultats
+results <- tidy(mod.nb, conf.int = TRUE) |>
+  mutate(
+    `Coefficient brut` = estimate,
+    `Exponentielle du coefficient` = exp(estimate),
+    `Erreur standard` = std.error,
+    `Valeur p` = p.value
+  ) |>
+  select(
+    Variable = term,
+    `Coefficient brut`,
+    `Exponentielle du coefficient`,
+    `Erreur standard`,
+    `Valeur p`
+  )
 
+# Renommer les variables si souhaité (optionnel)
+results$Variable <- recode(results$Variable,
+  "(Intercept)" = "Intercept",
+  "popdensity_hab_per_km2" = "Densité de population",
+  "elevation_m" = "Altitude",
+  "main_clcCLC_agri_intensive" = "Milieux agricoles intensifs",
+  "main_clcCLC_agri_seminat" = "Milieux agricoles semi-naturels",
+  "main_clcCLC_forest" = "Forêts",
+  "main_clcCLC_open_seminat" = "Milieux ouverts semi-naturels",
+  "main_clcCLC_urban" = "Milieux urbains"
+)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Interprétation des résultats
-
-On interprète les résultat du modèle binomial négatif qui modélise la fonction suivante : log(moy(nobs)) = beta_0 + beta_1 \* popdensity_hab_per_km2 + beta_2 \* elevation_m + beta_3 \* main_clc + beta_4 \* main_bioclim
-
-
-
-
-Discussion : la proportion d'hab explique partiellement l'urbanisation donc les 2 variables sont liées ? 
-faire un graph de densité de pop en fonction de clc. Même pour altitude, vérifier la corrélation entre les variables, graph ? test? terme d'interaction (interaction des effets entre 2 var explicatives) ? En tout cas en discuter pour l'interprétation des résultats
-
-Est-ce qu'on passe les variables en log ? 
-
-Tests à posteriori à chercher et réaliser (checker package dharrma), normalité des résidus etc
-
-
-
-
-
+# Export au format Word
+save_as_docx(
+  flextable(results),
+  path = here("figures/rapport_stage_M1_TMP", "tableau_glm_complet.docx")
+)
+```
 
 
-
-
-
-
-
-
-
-## Transformation de variables explicatives et comparaison de modèles basée sur l'AIC
-
+Discussion : la proportion d'hab explique partiellement l'urbanisation donc les 2 variables sont liées ? faire un graph de densité de pop en fonction de clc. Même pour altitude, vérifier la corrélation entre les variables, graph ? test? terme d'interaction (interaction des effets entre 2 var explicatives) ? En tout cas en discuter pour l'interprétation des résultats

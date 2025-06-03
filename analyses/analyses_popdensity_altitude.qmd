@@ -31,8 +31,8 @@ fig_folder <- here("figures/preprocessing")
 # Chargement et filtrage des données observées
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m) & popdensity_hab_per_km2 >= 0 & elevation_m >= 0]
-# Filtrage des données entre 1990 et 2020 inclus
-dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2020-12-31")]
+# Filtrage des données entre 1990 et 2018 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-31")]
 ```
 
 Les données de densité de population sont tirées des estimations du Joint Research Centre (JRC) Data Catalogue, pour 2010, avec une résolution spatiale de 1 km. Les valeurs sont en nombre d'habitants par km².
@@ -113,7 +113,7 @@ qqnorm((sample_pop_exp), main = "QQ-plot (échantillon)")
 qqline((sample_pop_exp), col = "red", lwd = 2)
 ```
 
-La distribution de la densité de population attendue n'est pas normale (W = 0.13128, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+La distribution de la densité de population attendue n'est pas normale (W = 0.12463, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
 
 ```{r}
 #| eval: false
@@ -192,7 +192,7 @@ qqnorm((sample_pop_obs), main = "QQ-plot (échantillon)")
 qqline((sample_pop_obs), col = "red", lwd = 2)
 ```
 
-Les données ne sont pas normales (W = 0.24363, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
+Les données ne sont pas normales (W = 0.27308, p-value \< 2.2e-16), on utilisera donc des tests non-paramétriques pour analyser ces données (Mann-Whitney ou Kolmogorov-Smirnov).
 
 ```{r}
 #| eval: false
@@ -238,13 +238,13 @@ ggplot(pop_comp, aes(x = pop, fill = source)) +
   geom_density(alpha = 0.5) +
   scale_x_continuous() +
   labs(title = "Distribution des densités de population",
-       x = "densité de population hab/km²)", y = "Densité") + xlim(-1,750) +
+       x = "densité de population hab/km²)", y = "Densité") + xlim(-1,100) +
   theme_minimal()
 ggplot(pop_comp, aes(x = pop, fill = source)) +
   geom_density(alpha = 0.5) +
   scale_x_continuous(trans = "log1p") +
   labs(title = "Distribution des densités de population",
-       x = "log(1 + densité de population hab/km²)", y = "Densité") +
+       x = "log(1 + densité de population hab/km²)", y = "Densité") + 
   theme_minimal()
 ggplot(pop_comp[pop > 0], aes(x = pop, fill = source)) +
   geom_density(alpha = 0.5) +
@@ -498,7 +498,7 @@ ks.test(dat$elevation_m, alt_exp_indiv)
 ggplot(pop_comp, aes(x = pop, color = source)) +
   stat_ecdf(geom = "step") +
   labs(title = "Fonctions de répartition cumulées (ECDF)",
-       x = "Altitude (m)", y = "F(x)") + xlim(0,6000) +
+       x = "Altitude (m)", y = "F(x)") + xlim(0,3000) +
   theme_minimal()
 ```
 

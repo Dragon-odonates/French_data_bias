@@ -37,8 +37,8 @@ str(dat)
 ```
 
 ```{r}
-# Filtrage des données entre 1990 et 2020 inclus
-dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2020-12-31")]
+# Filtrage des données entre 1990 et 2018 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-31")]
 
 # Vérification
 dim(dat)
@@ -319,15 +319,21 @@ lancover_groups_long <- melt(landcover_groups_comp,
                  value.name = "perc")
 # Barplot
 ggplot(lancover_groups_long[!is.na(perc)], aes(x = reorder(landcover_groups, perc),
-                     y = perc, 
-                     fill = type)) +
+                                               y = perc, 
+                                               fill = type)) +
   geom_col(position = "dodge") +
   coord_flip() +
-  scale_fill_manual(values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue")) +
-  labs(x = NULL, y = "Proportion (%)", fill = "Type de donnée") +
+  scale_fill_manual(
+    values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue"),
+    labels = c("perc_obs" = "Observée", "perc_exp" = "Attendue")
+  ) +
+  labs(x = NULL, y = "Proportion (%)", fill = "Distribution") +
   theme_minimal(base_size = 14) +
   theme(axis.text.y = element_text(size = 8, face = "italic"),
         legend.position = "top")
+
+ggsave(file.path(fig_folder, "distribCLC.png"), width = 8, height = 6, dpi = 300)
+
 ```
 
 ```{r}
@@ -339,9 +345,6 @@ khi2_groups
 fei(x = landcover_groups_comp$N_obs, 
                         p = landcover_groups_comp$N_exp / sum(landcover_groups_comp$N_exp))
 ```
-
--   Adjusted for uniform expected probabilities.
--   One-sided CIs: upper bound fixed at \[1.00\].!! Chercher pourquoi on a ce résultat
 
 Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 938190, df = 6, p \< 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale très faible voir nulle par rapport à la distribution théorique (FEI = 0.07).
 
@@ -365,13 +368,21 @@ ggplot(landcover_groups_comp, aes(x = contrib_khi2_perc,
 # Quels groupes sont sur- ou sous-représentés dans les données ?
 landcover_groups_comp[, deviation := khi2_groups$stdres]
 ggplot(landcover_groups_comp, aes(x = deviation, 
-                      y = reorder(landcover_groups, deviation))) +
+                                  y = reorder(landcover_groups, deviation))) +
   geom_col(aes(fill = deviation > 0)) +
-  scale_fill_manual(values = c("steelblue", "tomato"), 
-                    labels = c("Sous-représenté", "Sur-représenté")) +
-  labs(x = "Résidu standardisé",
-       title = "Sur- ou sous-représentation des groupes landcover") +
-  theme_minimal(base_size = 14)
+  scale_fill_manual(
+    values = c("FALSE" = "steelblue", "TRUE" = "tomato"),
+    labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
+    name = NULL  # Supprime le titre de la légende
+  ) +
+  labs(x = "Résidu standardisé", y = NULL) +  # Supprime le label de l’axe y
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_blank(),             # Supprime le titre de la figure
+    legend.position = "top"
+  )
+
+ggsave(file.path(fig_folder, "resiCLC.png"), width = 8, height = 6, dpi = 300)
 ```
 
 
@@ -415,11 +426,11 @@ fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
 # Importer le raster GEnSv3 et la table de correspondance
 gens <- rast(here(gisdata_folder, "GEnSv3","GEnSv3","gens_v3.tif"))
 meta_gens <- read.csv(here(read_folder, "GEnS_v3_classification.csv"))
-# Reprojetter le vecteur pour le superposer au raster
-fr_4326 <- project(fr, crs(gens))
+# Reprojetter le raster pour le superposer au vecteur
+gens_3035 <- project(gens, crs(fr))
 # Couper le raster aux frontières de la métropole
-gens_fr <- crop(gens, fr_4326, mask=TRUE)
-# Comme on a un raster en lat/long, on calcule les statistiques avec expanse()
+gens_fr <- crop(gens_3035, fr, mask=TRUE)
+# Calcul des surfaces
 area_gens <- expanse(gens_fr, unit="km", byValue=TRUE)
 # Calculer la proportion du territoire métropolitain couverte par chaque zone bioclimatique
 france_gens <- data.frame(
@@ -482,8 +493,28 @@ On va maintenant produire des graphiques et tableaux comparatifs des 2 distribut
 
 ```{r}
 # Joindre les 2 distributions par les labels des zones bioclimatiques
-gens_comp <- gens_obs[gens_exp, on = .(GEnS_v3_bioclim)][!is.na(N_obs) & !is.na(N_exp) & perc_obs >= 1 & perc_exp >= 1]
+gens_comp <- gens_obs[gens_exp, on = .(GEnS_v3_bioclim)][!is.na(N_obs) & !is.na(N_exp)]
 gens_comp |> datatable()
+
+## Regrouper les classes rares (<1% dans les 2 distributions)
+# Créer une colonne qui indique si la classe est "rare"
+gens_comp[, rare := (perc_obs < 1) | (perc_exp < 1)]
+# Séparer les classes rares des communes
+rare_classes <- gens_comp[rare == TRUE]
+# Somme des effectifs et pourcentages des classes rares
+autres <- data.table(
+  GEnS_v3_bioclim = "Autres",
+  N_obs = sum(rare_classes$N_obs),
+  N_exp = sum(rare_classes$N_exp),
+  perc_obs = sum(rare_classes$perc_obs),
+  perc_exp = sum(rare_classes$perc_exp)
+)
+# Garder uniquement les classes non rares
+gens_comp <- gens_comp[rare == FALSE]
+# Ajouter la ligne "Autres" puis trier
+gens_comp <- rbind(gens_comp[, -"rare"], autres, fill = TRUE)
+gens_comp <- gens_comp[order(-perc_exp)]
+
 # Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
 gens_long <- melt(gens_comp,
                  id.vars = "GEnS_v3_bioclim",
@@ -493,15 +524,21 @@ gens_long <- melt(gens_comp,
 
 # Barplot
 ggplot(gens_long[!is.na(perc)], aes(x = reorder(GEnS_v3_bioclim, perc),
-                                    y = perc, 
-                                    fill = type)) +
+                                              y = perc, 
+                                              fill = type)) +
   geom_col(position = "dodge") +
   coord_flip() +
-  scale_fill_manual(values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue")) +
-  labs(x = NULL, y = "Proportion (%)", fill = "Type de donnée") +
+  scale_fill_manual(
+    values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue"),
+    labels = c("perc_obs" = "Observée", "perc_exp" = "Attendue")
+  ) +
+  labs(x = NULL, y = "Proportion (%)", fill = "Distribution") +
   theme_minimal(base_size = 14) +
   theme(axis.text.y = element_text(size = 8, face = "italic"),
         legend.position = "top")
+
+ggsave(file.path(fig_folder, "distribGENS.png"), width = 8, height = 6, dpi = 300)
+
 ```
 
 Rq : probablement que la zone méditerranée est importante dans les données opportunistes (plus d'sp sous contraintes, peut-être plus de suivis dans ces zones là) = effet vacances ie odonatologues opportunistes font des suivis hors de leur zone d'origine.
@@ -536,13 +573,32 @@ ggplot(gens_comp, aes(x = contrib_khi2_perc,
 # Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
 gens_comp[, deviation := khi2_gens$stdres]
 ggplot(gens_comp, aes(x = deviation, 
-                      y = reorder(GEnS_v3_bioclim, deviation))) +
+                                      y = reorder(GEnS_v3_bioclim, deviation))) +
   geom_col(aes(fill = deviation > 0)) +
-  scale_fill_manual(values = c("steelblue", "tomato"), 
-                    labels = c("Sous-représentée", "Sur-représentée")) +
-  labs(x = "Résidu standardisé",
-       title = "Sur- ou sous-représentation des zones bioclimatiques") +
-  theme_minimal(base_size = 14)
+  scale_fill_manual(
+    values = c("FALSE" = "steelblue", "TRUE" = "tomato"),
+    labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
+    name = NULL
+  ) +
+  labs(x = "Résidu standardisé", y = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_blank(),
+    legend.position = "top"
+  )
+ggsave(file.path(fig_folder, "distribGENS.png"), width = 8, height = 6, dpi = 300)
 ```
 
-Ce graphique permet de savoir quelles zones bioclimatiques sont sur ou sous-représentées dans les données, mais c'est à remettre en contexte, le FEI montre que la différence entre les distributions observées et attendues n'est pas significative écologiquement parlant. C'est-à-dire qu'il y a un biais oui, mais il n'est pas assez important pour qu'on s'en inquiète réellement. A vérifier.  
+Ce graphique permet de savoir quelles zones bioclimatiques sont sur ou sous-représentées dans les données, mais c'est à remettre en contexte, le FEI montre que la différence entre les distributions observées et attendues n'est pas significative écologiquement parlant. C'est-à-dire qu'il y a un biais oui, mais il n'est pas assez important pour qu'on s'en inquiète réellement. A vérifier. 
+
+
+## Figure pour rapport
+
+
+
+
+```{r}
+
+```
+
+
