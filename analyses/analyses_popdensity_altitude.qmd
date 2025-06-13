@@ -257,6 +257,26 @@ ggplot(pop_comp[pop > 0], aes(x = pop, fill = source)) +
 A garder dans le rapport : graphe log1p (pour l’analyse exploratoire) et log10 (pour comparer les queues des distributions).
 
 ```{r}
+ggplot(pop_comp, aes(x = pop, fill = source)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(
+    trans = "log1p",
+    breaks = c(0, 1, 10, 100, 1000, 10000),
+    labels = scales::comma_format()
+  ) +
+  labs(
+    x = "Densité de population (hab/km², échelle log1p)",
+    y = "Densité estimée",
+    fill = "Distribution"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_blank())
+
+ggsave(file.path(fig_folder, "distribpopdensity.png"), width = 8, height = 6, dpi = 300)
+```
+
+
+```{r}
 # Test de Kolmogorov-Smirnov
 ks.test(dat$popdensity_hab_per_km2, pop_exp_indiv)
 # Comparaison visuelle des distributions cumulées
@@ -489,7 +509,32 @@ ggplot(alt_comp[alt > 0], aes(x = alt, fill = source)) +
        x = "Altitude (m)", y = "Densité") +
   theme_minimal()
 ```
-zoomer un peu pour le rapport
+
+```{r}
+ggplot(alt_comp, aes(x = alt, fill = source)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(
+  trans = "log1p",
+  breaks = c(0, 50, 200, 1000, 3000),
+  labels = scales::comma_format(),
+  expand = c(0, 0)
+) +
+  scale_fill_manual(
+    values = c("alt_obs" = "#00BFC4", "alt_exp" = "#F8766D"),
+    labels = c("alt_obs" = "Observée", "alt_exp" = "Attendue")
+) +
+  labs(
+    x = "Altitude (m, échelle log1p)",
+    y = "Densité estimée",
+    fill = "Distribution"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_blank())
+
+ggsave(file.path(fig_folder, "distribaltitude.png"), width = 8, height = 6, dpi = 300)
+
+```
+
 
 ```{r}
 # Test de Kolmogorov-Smirnov

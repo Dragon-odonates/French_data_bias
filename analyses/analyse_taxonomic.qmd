@@ -1,0 +1,352 @@
+---
+title: "analyse_taxonomic"
+format:
+  html:
+    number-sections: true
+    embed-resources: true
+editor: visual
+---
+
+## Bibliothèques, chemins, chargement des données
+
+```{r}
+# Bibliothèques
+#| warning: false
+library(here)
+library(data.table)
+library(ggplot2)
+
+# Chemins
+read_folder <- here("data/03_grid")
+gisdata_folder <- here("data/gis")
+fig_folder <- here("figures/preprocessing")
+
+# Chargement des données
+dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
+```
+
+## Correction des noms d'espèces pour éviter les synonymes
+
+```{r}
+# Charger le fichier Excel de correspondance des noms d'espèces en renommant la colonne scientificName en correctedName
+taxo_corrections <- fread(file.path(read_folder, "france_taxo.csv"))[, .(verbatimName, correctedName = scientificName)]
+
+# Joindre les corrections aux données odonates
+dat <- merge(dat, taxo_corrections, by = "verbatimName", all.x = TRUE)
+
+# Remplacer scientificName par correctedName si disponible
+dat[, scientificName := ifelse(!is.na(correctedName), correctedName, scientificName)]
+
+# Nettoyage : supprimer la colonne temporaire correctedName
+dat[, correctedName := NULL]
+
+# Vérification
+dat[, .N, by = scientificName][order(-N)]
+dat[, .N, by = verbatimName][order(-N)]
+```
+
+# Traitement des données pour l'analyse du biais taxonomique
+
+```{r}
+# Filtrer les données sans région affiliée
+dat <- dat[!is.na(region)]
+
+# Séparer les jeux de données steli et atlas
+dat_steli <- dat[source=="STELI"]
+dat_atlas <- dat[source=="atlas"]
+
+# Lister toutes les régions uniques et leurs effectifs
+dat_steli[, .N, by = region][order(-N)]
+dat_atlas[, .N, by = region][order(-N)]
+```
+
+## Choix des fenêtres spatio-temporelles d'étude
+
+### Hauts-de-France
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_hdf <- dat[region=="Hauts-de-France"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_hdf <- dat_hdf[, .N, by = list(source, year(dat_hdf$eventDate))]
+ggplot(datN_hdf) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Hauts-de-France", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Nouvelle-Aquitaine
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_na <- dat[region=="Nouvelle-Aquitaine"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_na <- dat_na[, .N, by = list(source, year(dat_na$eventDate))]
+ggplot(datN_na) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Nouvelle-Aquitaine", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Auvergne-Rhône-Alpes
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_aur <- dat[region=="Auvergne-Rhône-Alpes"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_aur <- dat_aur[, .N, by = list(source, year(dat_aur$eventDate))]
+ggplot(datN_aur) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Auvergne-Rhône-Alpes", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Occitanie
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_occ <- dat[region=="Occitanie"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_occ <- dat_occ[, .N, by = list(source, year(dat_occ$eventDate))]
+ggplot(datN_occ) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Occitanie", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Normandie
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_nmd <- dat[region=="Normandie"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_nmd <- dat_nmd[, .N, by = list(source, year(dat_nmd$eventDate))]
+ggplot(datN_nmd) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Normandie", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Grand Est
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_ge <- dat[region=="Grand Est"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_ge <- dat_ge[, .N, by = list(source, year(dat_ge$eventDate))]
+ggplot(datN_ge) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Grand Est", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Provence-Alpes-Côte d'Azur
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_paca <- dat[region=="Provence-Alpes-Côte d'Azur"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_paca <- dat_paca[, .N, by = list(source, year(dat_paca$eventDate))]
+ggplot(datN_paca) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Provence-Alpes-Côte d'Azur", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Centre-Val de Loire
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_cvl <- dat[region=="Centre-Val de Loire"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_cvl <- dat_cvl[, .N, by = list(source, year(dat_cvl$eventDate))]
+ggplot(datN_cvl) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Centre-Val de Loire", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+### Île-de-France
+
+```{r}
+# Filtrer une région + 2011-2024
+dat_idf <- dat[region=="Île-de-France"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+
+# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
+datN_idf <- dat_idf[, .N, by = list(source, year(dat_idf$eventDate))]
+ggplot(datN_idf) +
+  geom_line(aes(x = year, y = N)) +
+  # geom_point(aes(x = year, y = N)) +
+  theme_minimal() +
+  labs(title = "Île-de-France", y = "Occurrences") +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
+  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
+  #                               seq(1990, 2024, by = 10))) +
+  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
+  facet_wrap(facets = vars(source), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Comparer la distribution des espèces entre les données STELI et ATLAS (données non filtrées !!)
+
+```{r}
+# Table croisée espèces × source
+table_species <- dat[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Supprimer les espèces absentes des deux jeux de données
+table_species <- table_species[atlas + STELI > 0]
+
+# Créer la table de contingence
+mat <- as.matrix(table_species[, .(atlas, STELI)])
+rownames(mat) <- table_species$species_name
+
+# Test du chi² d’indépendance
+test_chi2 <- chisq.test(mat)
+test_chi2
+```
+
+```{r}
+# Ajouter les proportions
+table_species[, `:=`(
+  prop_atlas = atlas / sum(atlas),
+  prop_steli = STELI / sum(STELI)
+)]
+
+# Format long pour ggplot
+table_prop_long <- melt(table_species[, .(scientificName, prop_atlas, prop_steli)],
+                        id.vars = "scientificName",
+                        variable.name = "source", value.name = "proportion")
+
+# Renommer les labels
+table_prop_long[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Barplot des proportions par espèce
+ggplot(table_prop_long, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source",
+       title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"),
+        legend.position = "top")
+```
+
+```{r}
+# Résidus standardisés : signalent les espèces sur/sous-représentées
+residus <- test_chi2$stdres
+
+# Ajouter les résidus dans la table (ici pour atlas uniquement) 
+table_species[, `:=`(residus_atlas = residus[, "atlas"])]
+
+# Calculer la déviation (sens du biais)
+table_species[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Sélection des 50 espèces avec les plus grands biais (en absolu)
+top_bias_atlas <- table_species[order(-abs(residus_atlas))][1:30]
+
+# Graphique
+ggplot(top_bias_atlas, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(
+    x = NULL, y = "Résidu standardisé (ATLAS)",
+    fill = "Biais de représentation",
+    title = "Top 20 des espèces les plus biaisées dans ATLAS"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.y = element_text(size = 8, face = "italic"),
+    legend.position = "top"
+  )
+```

@@ -373,7 +373,7 @@ ggplot(landcover_groups_comp, aes(x = deviation,
   scale_fill_manual(
     values = c("FALSE" = "steelblue", "TRUE" = "tomato"),
     labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
-    name = NULL  # Supprime le titre de la légende
+    name = "Classe"  
   ) +
   labs(x = "Résidu standardisé", y = NULL) +  # Supprime le label de l’axe y
   theme_minimal(base_size = 14) +
@@ -515,6 +515,23 @@ gens_comp <- gens_comp[rare == FALSE]
 gens_comp <- rbind(gens_comp[, -"rare"], autres, fill = TRUE)
 gens_comp <- gens_comp[order(-perc_exp)]
 
+# Traduire les noms des classes qui m'intéressent pour le graphique 
+
+gens_comp[, GEnS_v3_bioclim := as.character(GEnS_v3_bioclim)]  # au cas où
+
+gens_comp[, GEnS_v3_bioclim := fifelse(
+  GEnS_v3_bioclim == "J. Cool temperate and moist", "J. Tempéré frais et humide",
+  fifelse(
+    GEnS_v3_bioclim == "K. Warm temperate and mesic", "K. Tempéré chaud et mésique",
+    fifelse(
+      GEnS_v3_bioclim == "G. cold and mesic", "G. Froid et mésique",
+      GEnS_v3_bioclim
+    )
+  )
+)]
+
+
+
 # Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
 gens_long <- melt(gens_comp,
                  id.vars = "GEnS_v3_bioclim",
@@ -578,7 +595,7 @@ ggplot(gens_comp, aes(x = deviation,
   scale_fill_manual(
     values = c("FALSE" = "steelblue", "TRUE" = "tomato"),
     labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
-    name = NULL
+    name = "Classe"
   ) +
   labs(x = "Résidu standardisé", y = NULL) +
   theme_minimal(base_size = 14) +
