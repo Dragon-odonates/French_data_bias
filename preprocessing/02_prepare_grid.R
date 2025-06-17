@@ -29,7 +29,7 @@ write_folder <- here("data/03_grid")
 source(file.path(fun_folder, "format_data.R"))
 
 grid_scale <- c(1000, 5000, 10000)
-
+build_grid <- FALSE
 
 # Prepare France ----------------------------------------------------------
 # Get France
@@ -75,15 +75,23 @@ scale_names <- paste("scale", grid_scale, sep = "_")
 names(grids) <- scale_names
 
 for (i in 1:ngrid) {
-  gr <- grid_scale[i]
-  grid <- make_grid(extent = fr_3035,
-                    cellsize = gr)
-  grids[[i]] <- grid
 
-  # Save RDS
   scale_name <- names(grids)[i]
-  saveRDS(grid,
-          file.path(write_folder, paste0("grid_", scale_name, ".rds")))
+
+  if (build_grid) {
+    gr <- grid_scale[i]
+    grid <- make_grid(extent = fr_3035,
+                      cellsize = gr)
+    grids[[i]] <- grid
+
+    # Save RDS
+    saveRDS(grid,
+            file.path(write_folder, paste0("grid_", scale_name, ".rds")))
+  } else {
+    grids[[i]] <- readRDS(file.path(write_folder,
+                                    paste0("grid_", scale_name, ".rds")))
+  }
+
 }
 
 
@@ -125,11 +133,13 @@ df_steli <- readRDS(file.path(read_folder, "steli.rds"))
 df_atlas <- readRDS(file.path(read_folder, "atlas.rds"))
 
 sf_steli <- st_as_sf(df_steli,
-                     coords = c("decimalLongitude", "decimalLatitude"), remove=FALSE)
+                     coords = c("decimalLongitude", "decimalLatitude"),
+                     remove = FALSE)
 st_crs(sf_steli) <- 4326
 
 sf_atlas <- st_as_sf(df_atlas,
-                     coords = c("decimalLongitude", "decimalLatitude"), remove=FALSE)
+                     coords = c("decimalLongitude", "decimalLatitude"),
+                     remove = FALSE)
 st_crs(sf_atlas) <- 4326
 
 # Transform CRS

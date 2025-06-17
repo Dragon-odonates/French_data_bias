@@ -58,55 +58,22 @@ df_atlas <- rename_cols(key = names_key,
 # Clean data in columns ---------------------------------------------------
 
 ## Species names -----
+taxo_steli <- fread(file.path(read_folder,
+                              "taxo_STELI.csv"))
+taxo_steli <- unique(taxo_steli)
+taxo_steli <- taxo_steli[!scientificName %in% c("Zygoptera", "Anisopetera"),]
 
-df_steli[scientificName == "Calopteryx groupe splendens",
-         scientificName := "Calopteryx splendens"]
-df_steli[scientificName == "Leste groupe sponsa",
-         scientificName := "Lestes sponsa"]
-df_steli[scientificName == "Leste groupe viridis",
-         scientificName := "Lestes viridis"]
-df_steli[scientificName == "Agrion Porte-coupe/vander Linden",
-         scientificName := "Enallagma cyathigerum"]
-df_steli[scientificName == "Aeschne groupe cyanea",
-         scientificName := "Aeshna cyanea"]
-df_steli[scientificName == "Aeschne groupe cyanea",
-         scientificName := "Aeshna cyanea"]
+taxo_atlas <- fread(file.path(read_folder,
+                              "taxo_Atlas.csv"))
+taxo_atlas <- unique(taxo_atlas)
+taxo_atlas <- taxo_atlas[!scientificName %in% c("Zygoptera", "Anisopetera"),]
 
-# Check against GBIF backbone
-steli_names <- name_backbone_checklist(unique(df_steli$scientificName))
-atlas_names <- name_backbone_checklist(unique(df_atlas$scientificName))
 
-# Check match types (ideally, exact only)
-unique(steli_names$matchType)
-# STELI has some non-species names
-steli_names$verbatim_name[steli_names$matchType == "NONE"]
+df_steli <- taxo_steli[df_steli,
+                       on = c("verbatimName" = "scientificName")]
 
-unique(atlas_names$matchType)
-
-steli_names <- data.table(steli_names[, c("canonicalName",
-                                          "verbatim_name",
-                                          "genus",
-                                          "family",
-                                          "rank",
-                                          "usageKey")])
-atlas_names <- data.table(atlas_names[, c("canonicalName",
-                                          "verbatim_name",
-                                          "genus",
-                                          "family",
-                                          "rank",
-                                          "usageKey")])
-
-df_steli <- steli_names[df_steli,
-                        on = c("verbatim_name" = "scientificName")]
-df_atlas <- steli_names[df_atlas,
-                        on = c("verbatim_name" = "scientificName")]
-
-setnames(df_steli,
-         old = c("canonicalName", "verbatim_name", "rank", "usageKey"),
-         new = c("scientificName", "verbatimName", "taxonRank", "taxonID"))
-setnames(df_atlas,
-         old = c("canonicalName", "verbatim_name", "rank", "usageKey"),
-         new = c("scientificName", "verbatimName", "taxonRank", "taxonID"))
+df_atlas <- taxo_atlas[df_atlas,
+                       on = c("verbatimName" = "scientificName")]
 
 ## Dates -----
 df_steli[, eventDate := as.IDate(eventDate, format =  "%d/%m/%Y")]

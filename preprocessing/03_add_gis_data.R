@@ -13,8 +13,9 @@ library(sf)
 library(here)
 
 read_folder <- here("data", "03_grid")
+write_folder <- here("data", "04_gis_info/data")
 data_folder <- here("data", "gis")
-extdata_folder <- here("~/OneDrive/Documents/Data/")
+# extdata_folder <- here("~/OneDrive/Documents/Data/")
 
 # Read data ----------------------------------------------------------------
 df_steli <- readRDS(file.path(read_folder, "steli.rds"))
@@ -25,8 +26,8 @@ coocol <- c("decimalLongitude", "decimalLatitude")
 coo <- rbind(df_steli[, coocol], df_atlas[, coocol])
 
 # to make faster extraction, select only unique coordinates
-coo <- coo[!duplicated(coo), ]
 coo <- sf::st_set_geometry(coo, NULL)
+coo <- coo[!duplicated(coo), ]
 dim(coo) # 263427 unique coordinates
 
 # create vector spatial layer
@@ -39,7 +40,7 @@ shp <- st_as_sf(coo, coords = coocol, crs = 4326)
 
 # administrative regions -----------
 # from https://gadm.org/data.html
-gadm <- vect(here(extdata_folder, "gadm", "gadm41_FRA_2.shp"))
+gadm <- vect(here(data_folder, "gadm41_FRA_shp", "gadm41_FRA_2.shp"))
 gadm_points <- extract(gadm, vect(shp)) # take some time to compute
 # table(gadm_points$NAME_1, useNA="ifany")
 
@@ -53,8 +54,8 @@ glo30 <- glo30[order(glo30$FID), ]
 
 # Bioclimatic regions ---------
 # Metzger et al. 2013 https://doi.org/10.1111/geb.12022
-gens <- rast(here(data_folder, "eu_croped_gens_v3.tif"))
-meta_gens <- read.csv(here(data_folder, "GEnS_v3_classification.csv"))
+gens <- rast(here(data_folder, "BIOCLIM/eu_croped_gens_v3.tif"))
+meta_gens <- read.csv(here(data_folder, "BIOCLIM/GEnS_v3_classification.csv"))
 gens_points <- extract(gens, shp)
 m_gens <- match(gens_points$eu_croped_gens_v3, meta_gens$GEnS_seq)
 gens_points$gens_name <- meta_gens$GEnZname[m_gens]
@@ -63,7 +64,7 @@ gens_points$gens_name <- meta_gens$GEnZname[m_gens]
 # population density 2010 ---------
 # https://data.jrc.ec.europa.eu/dataset/2ff68a52-5b5b-4a22-8f40-c41da8332cfe
 pop <- rast(
-  here(data_folder, "GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
+  here(data_folder, "GHS/GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
 )
 # get the vector in World_Mollweide projection
 shp_54009 <- st_transform(shp, crs = crs(pop))
@@ -75,7 +76,7 @@ pop_points <- extract(pop, shp_54009)
 # https://land.copernicus.eu/en/products/corine-land-cover/clc2018
 # with 100m resolution (but we could get Corine plus at 10m)
 clc <- rast(here(
-  extdata_folder,
+  data_folder,
   "Corine",
   "u2018_clc2018_v2020_20u1_raster100m/DATA/U2018_CLC2018_V2020_20u1.tif"
 ))
@@ -101,4 +102,4 @@ gis_info <- data.frame(
   "CLC2018_landcover" = clc_points$LABEL3
 )
 
-write.csv(gis_info, here(read_folder, "gis_info.csv"), row.names = FALSE)
+write.csv(gis_info, here(write_folder, "gis_info.csv"), row.names = FALSE)

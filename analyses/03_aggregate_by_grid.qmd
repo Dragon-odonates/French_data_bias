@@ -22,8 +22,11 @@ library(dplyr)
 
 library(sf)
 
-read_folder <- here("data/03_grid")
-write_folder <- here("data/04_aggregate_by_grid")
+read_folder <- here("data/04_gis_info/data")
+grid_folder <- here("data/03_grid")
+
+
+write_folder <- here("data/05_aggregate_by_grid")
 ```
 
 ## Load data
@@ -230,7 +233,7 @@ ggplot(dat_grid) +
 
 ```{r}
 # Read grid (nb choose the right grid scale)
-grid <- readRDS(file.path(read_folder, 
+grid <- readRDS(file.path(grid_folder, 
                           "grid_scale_10000.rds"))
 
 # Add spatial grid

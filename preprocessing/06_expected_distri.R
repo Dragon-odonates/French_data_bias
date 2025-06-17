@@ -11,20 +11,21 @@ library(terra)
 library(here)
 
 read_folder <- here("data", "03_grid")
+write_folder <- here("data/04_gis_info/reference")
 data_folder <- here("data", "gis")
-extdata_folder <- here("~/OneDrive/Documents/Data/")
+# extdata_folder <- here("~/OneDrive/Documents/Data/")
 
 
 # Get French map ----------------------------------
 # from https://gadm.org/data.html
-fr <- vect(here(extdata_folder, "gadm", "gadm41_FRA_0.shp"))
+fr <- vect(here(data_folder, "gadm41_FRA_shp", "gadm41_FRA_0.shp"))
 # plot(fr)
 
 # CORINE land cover 2018 -----------------
 # https://land.copernicus.eu/en/products/corine-land-cover/clc2018
 # with 100m resolution (but we could get Corine plus at 10m)
 clc <- rast(here(
-  extdata_folder,
+  data_folder,
   "Corine",
   "u2018_clc2018_v2020_20u1_raster100m/DATA/U2018_CLC2018_V2020_20u1.tif"
 ))
@@ -44,15 +45,15 @@ france_clc <- data.frame(
 
 write.csv(
   france_clc,
-  here::here(read_folder, "france_clc2018_100m.csv"),
+  here::here(write_folder, "france_clc2018_100m.csv"),
   row.names = FALSE
 )
 
 
 # Bioclimatic regions ---------
 # Metzger et al. 2013 https://doi.org/10.1111/geb.12022
-gens <- rast(here(data_folder, "eu_croped_gens_v3.tif"))
-meta_gens <- read.csv(here(data_folder, "GEnS_v3_classification.csv"))
+gens <- rast(here(data_folder, "bioclim", "eu_croped_gens_v3.tif"))
+meta_gens <- read.csv(here(data_folder, "bioclim", "GEnS_v3_classification.csv"))
 
 gens_fr <- crop(gens, fr, mask = TRUE)
 # for non-equal area projection, pixels are not the same size
@@ -74,7 +75,7 @@ france_gens <- data.frame(
 
 write.csv(
   france_gens,
-  here::here(read_folder, "france_GEnS_v3.csv"),
+  here::here(write_folder, "france_GEnS_v3.csv"),
   row.names = FALSE
 )
 
@@ -82,7 +83,7 @@ write.csv(
 # population density 2010 ---------
 # https://data.jrc.ec.europa.eu/dataset/2ff68a52-5b5b-4a22-8f40-c41da8332cfe
 pop <- rast(
-  here(data_folder, "GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
+  here(data_folder, "GHS", "GHS_POP_E2010_GLOBE_R2023A_54009_1000_V1_0.tif")
 )
 # project france borders
 fr_54009 <- project(fr, crs(pop))
@@ -106,7 +107,7 @@ pop_density <- data.frame(
 # plot(pop_density$value + 1, pop_density$perc, log = "x", type = "l")
 write.csv(
   pop_density,
-  here::here(read_folder, "france_pop_density.csv"),
+  here::here(write_folder, "france_pop_density.csv"),
   row.names = FALSE
 )
 
@@ -131,6 +132,6 @@ fr_glo <- fr_glo[order(fr_glo$value), ]
 
 write.csv(
   fr_glo,
-  here::here(read_folder, "france_elevation.csv"),
+  here::here(write_folder, "france_elevation.csv"),
   row.names = FALSE
 )

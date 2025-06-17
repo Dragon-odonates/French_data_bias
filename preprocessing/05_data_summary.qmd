@@ -21,7 +21,9 @@ library(dplyr)
 
 library(sf)
 
-read_folder <- here("data/03_grid")
+read_folder <- here("data/04_gis_info/data")
+grid_folder <- here("data/03_grid")
+
 fig_folder <- here("figures/preprocessing")
 ```
 
@@ -39,25 +41,31 @@ str(dat)
 | Variable | Description |
 |:-----------------------------------|:-----------------------------------|
 | scientificName | latin name of the observed taxa |
+| species | latin name of the species |
+| genus | genus of the taxa |
+| taxonRank | rank of the taxa |
+| speciesID | ID of the species (from GBIF) |
+| taxonID | ID of the taxa (from GBIF) |
 | family | family name of the observed taxa |
-| occurrenceID | ID of the occurence event (unique ID of the row) |
 | eventDate | date of the observation |
 | recordedBy | name of the observer |
 | decimalLongitude | longitude in decimal degree (WGS84) |
 | decimalLatitude | latitude in decimal degree (WGS84) |
-| municipality | municipality of the observation |
-| verbatimName | full name of the species, including reference |
-| genus | genus of the taxa |
-| taxonRank | rank of the taxa |
-| taxonID | ID of the taxa (from GBIF) |
+| x_ETRS89_LAEA | longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| y_ETRS89_LAEA | latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| source | database of origin (steli or atlas) |
+| occurrenceID | ID of the occurence event (unique ID of the row) (to check) |
+| recordedBy | ID of the observer |
+| verbatimName | name of the species as indicated in the original table |
+| modifiedName | name of the species modified from the original table, used for backbone check against GBIF taxonomy |
 | id_1000 | ID of the grid cell at 1km resolution |
 | id_5000 | ID of the grid cell at 5km resolution |
 | id_10000 | ID of the grid cell at 10km resolution |
-| source | database of origin (steli or atlas) |
-| x_ETRS89_LAEA | longitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
-| y_ETRS89_LAEA | latitude in meter following the ETRS89 coordinate reference system and the Lambert Azimuthal Equal-Area projection |
+| id_ses | ID of the observation session (STELI only) |
+| id_site | ID of the observation site (STELI only) |
 | region | administrative region of the observation |
 | departement | administrative department of the observation |
+| municipality | municipality of the observation |
 | elevation_m | elevation (in m), from [Copernicus GLO-30 dataset](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) |
 | GEnS_v3_bioclim | bioclimatic region, from [Metzger et al. 2013](https://doi.org/10.1111/geb.12022) |
 | popdensity_hab_per_km2 | population density in 2010 from [JRC GHS-POP R2023A dataset](https://data.jrc.ec.europa.eu/dataset/2ff68a52-5b5b-4a22-8f40-c41da8332cfe) |
@@ -78,7 +86,7 @@ nsp <- dat[, .N, by = scientificName][order(-N), ]
 nsp |> datatable()
 ```
 
-## Species barplot
+## Species taxonomy
 
 ```{r, fig.height=6, fig.width=8}
 ggplot(nsp) +
@@ -99,6 +107,22 @@ ggsave(
   dpi = 300
 )
 ```
+
+```{r}
+dat_sp_src <- dat[taxonRank == "SPECIES", ]
+dat_sp_src <- unique(dat_sp_src[, ntot := .N, 
+                  by = source][, .(scientificName, source, ntot)])
+dat_sp_src[, `:=`(n = .N, prop = .N/ntot), 
+           by = c("scientificName", "source")]
+
+dat_sp_src |> 
+  tidyr::pivot_wider(names_from = source,
+                     values_from = prop,
+                     id_cols = scientificName, 
+                     values_fill = 0) |> 
+  DT::datatable()
+```
+
 
 ### Data evolution
 
@@ -157,7 +181,7 @@ Plot data on grid:
 
 ```{r}
 # Get grid
-grid <- readRDS(file.path(read_folder, "grid_scale_10000.rds"))
+grid <- readRDS(file.path(grid_folder, "grid_scale_10000.rds"))
 ```
 
 ```{r}
