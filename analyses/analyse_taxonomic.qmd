@@ -17,10 +17,13 @@ library(data.table)
 library(ggplot2)
 library(gt)
 
+library(lubridate)
+
 # Chemins
-read_folder <- here("data/03_grid")
+read_folder <- here("data/04_gis_info/data")
+grid_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
-fig_folder <- here("figures/preprocessing")
+fig_folder <- here("figures/taxo")
 
 # Chargement des données
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
@@ -30,7 +33,7 @@ dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 
 ```{r}
 # Charger le fichier Excel de correspondance des noms d'espèces en renommant la colonne scientificName en correctedName
-taxo_corrections <- fread(file.path(read_folder, "france_taxo.csv"))[, .(verbatimName, correctedName = scientificName)]
+taxo_corrections <- fread(file.path(grid_folder, "france_taxo.csv"))[, .(verbatimName, correctedName = scientificName)]
 
 # Joindre les corrections aux données odonates
 dat <- merge(dat, taxo_corrections, by = "verbatimName", all.x = TRUE)
@@ -38,8 +41,9 @@ dat <- merge(dat, taxo_corrections, by = "verbatimName", all.x = TRUE)
 # Remplacer scientificName par correctedName si disponible
 dat[, scientificName := ifelse(!is.na(correctedName), correctedName, scientificName)]
 
-# Nettoyage : supprimer la colonne temporaire correctedName
+# Nettoyage : supprimer la colonne temporaire correctedName + supprimer les identifications autres qu'au niveau espèce
 dat[, correctedName := NULL]
+dat <- dat[grepl(" ", scientificName)]
 
 # Vérification
 dat[, .N, by = scientificName][order(-N)]
@@ -212,29 +216,53 @@ for (col in as.character(2011:2024)) {
 gt_table
 ```
 
-### Tableau de décision basé sur critère de >5 "sites"
+### Tableau de décision basé sur critère de >10 sites
 
 ```{r}
-# Comptage sites (id_1000) par région et année
-tab_sites <- dat_steli[, .(n_sites = uniqueN(id_1000)), by = .(region, year = year(eventDate))]
+# Comptage sites par région et année
+tab_sites <- dat_steli[, .(n_sites = uniqueN(id_site)), by = .(region, year = year(eventDate))]
 
 # Table large : années en colonnes
 tab_sites_wide <- dcast(tab_sites, region ~ year, value.var = "n_sites", fill = 0)
 
-# tableau gt avec surbrillance cellules >= 200
+# tableau gt avec surbrillance cellules >= 10
 gt_table <- gt(tab_sites_wide) %>%
-  tab_header(title = "Nombre de sites STELI (id_1000) par région et par an")
+  tab_header(title = "Nombre de sites STELI par région et par an")
 for (col in as.character(2011:2024)) {
   gt_table <- gt_table %>%
     tab_style(
       style = cell_fill(color = "lightgreen"),
       locations = cells_body(
         columns = col,
-        rows = tab_sites_wide[[col]] >= 5
+        rows = tab_sites_wide[[col]] >= 10
       )
     )
 }
+gt_table
+```
 
+### Tableau de décision basé sur critère de >50 sessions
+
+```{r}
+# Comptage sessions par région et année
+tab_sites <- dat_steli[, .(n_sites = uniqueN(id_ses)), by = .(region, year = year(eventDate))]
+
+# Table large : années en colonnes
+tab_sites_wide <- dcast(tab_sites, region ~ year, value.var = "n_sites", fill = 0)
+
+# tableau gt avec surbrillance cellules >= 200
+gt_table <- gt(tab_sites_wide) %>%
+  tab_header(title = "Nombre de sessions par région et par an")
+for (col in as.character(2011:2024)) {
+  gt_table <- gt_table %>%
+    tab_style(
+      style = cell_fill(color = "lightgreen"),
+      locations = cells_body(
+        columns = col,
+        rows = tab_sites_wide[[col]] >= 50
+      )
+    )
+}
 gt_table
 ```
 
@@ -444,11 +472,11 @@ ggplot(table_prop_long_n2, aes(x = reorder(scientificName, proportion), y = prop
 
 
 
-### Hauts-de-France (2011-2019)
+### Hauts-de-France (2011-2017)
 
 ```{r}
 # Filtrage
-dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2019-12-31")]
+dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2017-12-31")]
 
 # Table croisée espèces × source
 table_species_hdf <- dat_hdf[, .N, by = .(scientificName, source)] |>
@@ -618,7 +646,7 @@ ggplot(table_prop_long_ge, aes(x = reorder(scientificName, proportion), y = prop
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-### Auvergne-Rhône-Alpes (2013–2019)
+### Auvergne-Rhône-Alpes (2013–2019) --> modifier les dates en fonction du critère de sélection...
 
 ```{r}
 # Filtrage des données
@@ -680,7 +708,7 @@ ggplot(table_prop_long_ara, aes(x = reorder(scientificName, proportion), y = pro
 
 ```
 
-### Région : Nouvelle-Aquitaine (2012–2019)
+### Région : Nouvelle-Aquitaine (2012–2019) --> modifier les dates en fonction du critère de sélection...
 
 ```{r}
 # Filtrage des données
@@ -804,9 +832,166 @@ ggplot(table_prop_long_occ, aes(x = reorder(scientificName, proportion), y = pro
 
 ## Phénologie : s'assurer que l'effort de collecte STELI est homogène mois par mois sur plusieurs années
 
-### Hauts-de-France (2011-2019)
+### Hauts-de-France (2011-2017)
 
 ```{r}
 # Filtrage
-dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2019-12-31")]
+dat_steli_hdf <- dat[source == "STELI" & region == "Hauts-de-France" & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2017-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_hdf[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_hdf[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+#Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_steli_hdf[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
 ```
+
+### Normandie (2012–2013)
+
+```{r}
+# Filtrage
+dat_steli_norm <- dat[source == "STELI" & region == "Normandie" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_norm[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_norm[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_norm[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Grand Est (2015–2017)
+
+```{r}
+# Filtrage
+dat_steli_ge <- dat[source == "STELI" & region == "Grand Est" & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2017-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_ge[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_ge[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Heatmap
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_ge[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Auvergne-Rhône-Alpes (2013–2019)
+
+```{r}
+# Filtrage
+dat_steli_ara <- dat[source == "STELI" & region == "Auvergne-Rhône-Alpes" & eventDate >= as.IDate("2013-01-01") & eventDate <= as.IDate("2019-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_ara[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_ara[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Heatmap
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_ara[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Nouvelle-Aquitaine (2012–2019)
+
+```{r}
+# Filtrage
+dat_steli_na <- dat[source == "STELI" & region == "Nouvelle-Aquitaine" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2019-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_na[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_na[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Heatmap
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_na[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Occitanie (2016–2018)
+
+```{r}
+# Filtrage
+dat_steli_occ <- dat[source == "STELI" & region == "Occitanie" & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2018-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_occ[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_occ[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Heatmap
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_occ[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+

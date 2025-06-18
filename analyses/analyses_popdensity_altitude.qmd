@@ -22,7 +22,8 @@ library(terra)
 library(sf)
 
 # Chemins
-read_folder <- here("data/03_grid")
+read_folder <- here("data/04_gis_info/data")
+grid_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
 fig_folder <- here("figures/rapport_stage_M1_TMP")
 
@@ -40,7 +41,7 @@ Les données de densité de population sont tirées des estimations du Joint Res
 
 ```{r}
 # Chargement et filtrage des données 
-pop_exp <- read.csv(file.path(read_folder, "pop_density.csv"), check.names = TRUE)
+pop_exp <- read.csv(file.path(grid_folder, "pop_density.csv"), check.names = TRUE)
 pop_exp <- pop_exp[!is.na(pop_exp$value) & pop_exp$value >= 0, ]
 
 # Les données sont agrégées, créer un dt vecteur avec les données individuelles
@@ -163,7 +164,7 @@ Il y a donc une différence significative de taille modérée entre les distribu
 
 ```{r}
 # Chargement des données 
-alt_exp <- read.csv(file.path(read_folder, "elevation_density.csv"), check.names = TRUE)
+alt_exp <- read.csv(file.path(grid_folder, "elevation_density.csv"), check.names = TRUE)
 # Les données sont agrégées, créer un dt avec les données individuelles
 alt_exp_indiv <- rep(alt_exp$value, times = alt_exp$area)
 alt_exp_dt <- data.table(alt = alt_exp_indiv)

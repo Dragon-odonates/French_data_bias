@@ -22,7 +22,8 @@ library(terra)
 library(sf)
 
 # Chemins
-read_folder <- here("data/03_grid")
+read_folder <- here("data/04_gis_info/data")
+grid_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
 fig_folder <- here("figures/rapport_stage_M1_TMP")
 
@@ -76,13 +77,12 @@ france_clc <- data.frame(
 )
 # Stocker le résultat dans un CSV
 write.csv(france_clc, 
-  here::here(read_folder, "france_clc2018_100m.csv"), row.names=FALSE)
+  here::here(grid_folder, "france_clc2018_100m.csv"), row.names=FALSE)
 ```
 
 ```{r}
 #Afficher le résultat
-clc_expected <- read.csv(file.path(read_folder, 
-                          "france_clc2018_100m.csv"))
+clc_expected <- read.csv(file.path(grid_folder, "france_clc2018_100m.csv"))
 clc_expected <- as.data.table(clc_expected)
 clc_expected <- clc_expected[order(-N_exp)][!is.na(CLC2018_landcover) & CLC2018_landcover != "NODATA"]
 clc_expected |> datatable()
@@ -394,7 +394,7 @@ Données issues de Metzger et al. 2013 https://doi.org/10.1111/geb.12022
 fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
 # Importer le raster GEnSv3 et la table de correspondance
 gens <- rast(here(gisdata_folder, "GEnSv3","GEnSv3","gens_v3.tif"))
-meta_gens <- read.csv(here(read_folder, "GEnS_v3_classification.csv"))
+meta_gens <- read.csv(here(grid_folder, "GEnS_v3_classification.csv"))
 # Reprojetter le raster pour le superposer au vecteur
 gens_3035 <- project(gens, crs(fr))
 # Couper le raster aux frontières de la métropole
@@ -410,12 +410,12 @@ france_gens <- data.frame(
 )
 # Stocker le résultat dans un CSV
 write.csv(france_gens, 
-  here::here(read_folder, "france_GEnS_v3.csv"), row.names=FALSE)
+  here::here(grid_folder, "france_GEnS_v3.csv"), row.names=FALSE)
 ```
 
 ```{r}
 # Afficher le résultat
-bioclim_exp <- read.csv(file.path(read_folder, "france_GEnS_v3.csv"))
+bioclim_exp <- read.csv(file.path(grid_folder, "france_GEnS_v3.csv"))
 bioclim_exp <- as.data.table(bioclim_exp)
 gens_exp <- bioclim_exp[, .(N_exp = sum(count),
   perc_exp = round(sum(count) / sum(bioclim_exp$count) * 100, 3)), by = GEnZname][order(-N_exp)]
