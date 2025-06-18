@@ -7,9 +7,10 @@ format:
 editor: visual
 ---
 
-## Bibliothèques et chemins
+## Bibliothèques, chemins, chargement des données
 
 ```{r}
+# Bibliothèques
 #| warning: false
 library(here)
 library(data.table)
@@ -19,24 +20,15 @@ library(rnaturalearth)
 library(dplyr)
 library(terra)
 library(sf)
-library(scales)
-library(effectsize)
 
+# Chemins
 read_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
-fig_folder <- here("figures/preprocessing")
-```
+fig_folder <- here("figures/rapport_stage_M1_TMP")
 
-## Chargement des données
-
-```{r}
+# Chargement des données
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 
-dim(dat)
-str(dat)
-```
-
-```{r}
 # Filtrage des données entre 1990 et 2018 inclus
 dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-31")]
 
@@ -45,22 +37,23 @@ dim(dat)
 summary(dat$eventDate)
 ```
 
+# Evaluation du biais spatial en lien avec l'occupation des sols
 
-## Etude du biais spatial d'occupation des sols (CLC2018_landcover)
+Objectif : comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine.
 
-L'objectif de cette partie est de comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine.
+Distribution attendue = distribution des classes d'occupation des sols sur l'ensemble du territoire français métropolitain
 
-Dans un premier temps, on va utiliser la classification Corine telle que renseignée dans le jeu de donnée (CLC2018_landcover), observer la distribution des classes (ie la distribution attendue des observations en supposant une répartition systématique) et la comparer à la distribution réelle des observations au sein de ces classes.
-
-### Distribution attendue des classes d'occupation des sols
-
-Quelle proportion du territoire métropolitain est couverte par chaque classe CLC ?
+Distribution observée = distribution des classes d'occupation des sols au sein des données d'occurrence d'odonates
 
 Données :
 
--   raster CLC2018 100m (France métropole + outre mer) https://land.copernicus.eu/en/products/corine-land-cover/clc2018
+-   raster CLC2018 100m (France métropole + outre mer) :  https://land.copernicus.eu/en/products/corine-land-cover/clc2018
 
--   shapefile frontières France métropole https://gadm.org/download_country.html
+-   shapefile frontières France métropole : https://gadm.org/download_country.html
+
+## Avec les classes CLC2018_landcover (niv. 3)
+
+### Distribution attendue
 
 ```{r}
 #| eval: false
@@ -106,7 +99,7 @@ ggplot(clc_expected) +
                                    size = 6))
 ```
 
-### Distribution observée des classes d'occupation des sols dans les données odonate
+### Distribution observée
 
 ```{r}
 # Nombre d'observations par classe CLC
@@ -128,13 +121,11 @@ ggplot(clc_observed) +
 
 ### Comparaison des distributions attendue et observée
 
-On va maintenant produire des graphiques et tableaux comparatifs des 2 distributions pour visualiser les biais, avant de tester statistiquement les différences de distribution des classes CLC.
-
 ```{r}
 # Joindre les 2 distributions par les ID CLC
 clc_comp <- clc_observed[clc_expected, on = .(CLC2018_landcover)][!is.na(N_obs) & !is.na(N_exp) & N_obs != 0]
 clc_comp |> datatable()
-# Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
+# Table en format long pour pouvoir la représenter graphiquement
 clc_long <- melt(clc_comp,
                  id.vars = "CLC2018_landcover",
                  measure.vars = c("perc_obs", "perc_exp"),
@@ -158,13 +149,11 @@ ggplot(clc_long[!is.na(perc)], aes(x = reorder(CLC2018_landcover, perc),
 khi2 <- chisq.test(x = clc_comp$N_obs, 
                         p = clc_comp$N_exp / sum(clc_comp$N_exp))
 khi2
-# Mesure de la taille de l'effet
-fei(khi2)
 ```
 
-Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 1377536, df = 40, p \< 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale très faible voir nulle par rapport à la distribution théorique (FEI = 0.0062).
+Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 1385849, df = 40, p \< 2.2e-16). 
 
-### Contributions des classes au Khi²
+#### Contributions des classes au Khi²
 
 ```{r}
 #Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
@@ -193,18 +182,11 @@ ggplot(clc_comp, aes(x = deviation,
   theme_minimal(base_size = 14)
 ```
 
-On voit donc qu'il y a des biais spatiaux dans l'échantillonnage, certains types de milieu sont préférentiellement visités, la distribution des observations n'est pas conforme à la proportion de chaque type de milieu sur le territoire français. On va répéter cette analyse en agrégant les classes CLC en groupes plus lisibles pour présenter ces résultats.
-
 ## Etude du biais spatial d'occupation des sols (classes agrégées)
 
-### Agrégation des classes CLC 
+Pour l'agrégation des classes CLC, se référer à la page : https://land.copernicus.eu/content/corine-land-cover-nomenclature-guidelines/html/
 
-Pour le regroupement des classes clc, se référer à la page : 
-https://land.copernicus.eu/content/corine-land-cover-nomenclature-guidelines/html/
-
-Créer un tableau résumé de l'aggrégation à mettre en annexe du rapport.
-
-### Distribution attendue des groupes de classes d'occupation des sols
+### Distribution attendue
 
 ```{r}
 # Création d'une nouvelle colonne de regroupement dans clc_expected
@@ -253,7 +235,7 @@ ggplot(landcover_groups_expected) +
                                    size = 6))
 ```
 
-### Distribution observée des classes d'occupation des sols dans les données odonate
+### Distribution observée 
 
 ```{r}
 # Création d'une nouvelle colonne de regroupement dans dat
@@ -305,8 +287,6 @@ ggplot(landcover_groups_observed) +
 
 ### Comparaison des distributions attendue et observée
 
-On va maintenant produire des graphiques et tableaux comparatifs des 2 distributions pour visualiser les biais, avant de tester statistiquement les différences de distribution des classes CLC.
-
 ```{r}
 # Joindre les 2 distributions par les ID CLC
 landcover_groups_comp <- landcover_groups_observed[landcover_groups_expected, on = .(landcover_groups)]
@@ -332,8 +312,8 @@ ggplot(lancover_groups_long[!is.na(perc)], aes(x = reorder(landcover_groups, per
   theme(axis.text.y = element_text(size = 8, face = "italic"),
         legend.position = "top")
 
+# Sauvegarder la figure (sans titre)
 ggsave(file.path(fig_folder, "distribCLC.png"), width = 8, height = 6, dpi = 300)
-
 ```
 
 ```{r}
@@ -341,12 +321,9 @@ ggsave(file.path(fig_folder, "distribCLC.png"), width = 8, height = 6, dpi = 300
 khi2_groups <- chisq.test(x = landcover_groups_comp$N_obs, 
                         p = landcover_groups_comp$N_exp / sum(landcover_groups_comp$N_exp))
 khi2_groups
-# Mesure de la taille de l'effet
-fei(x = landcover_groups_comp$N_obs, 
-                        p = landcover_groups_comp$N_exp / sum(landcover_groups_comp$N_exp))
 ```
 
-Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 938190, df = 6, p \< 2.2e-16). L'indice FEI (Frequency Effect Index) associé suggère une déviation globale très faible voir nulle par rapport à la distribution théorique (FEI = 0.07).
+Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 947328, df = 6, p \< 2.2e-16).
 
 ### Contributions des classes au Khi²
 
@@ -375,13 +352,14 @@ ggplot(landcover_groups_comp, aes(x = deviation,
     labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
     name = "Classe"  
   ) +
-  labs(x = "Résidu standardisé", y = NULL) +  # Supprime le label de l’axe y
+  labs(x = "Résidu standardisé", y = NULL) +  
   theme_minimal(base_size = 14) +
   theme(
-    plot.title = element_blank(),             # Supprime le titre de la figure
+    plot.title = element_blank(),             
     legend.position = "top"
   )
 
+# Sauvegarder la figure (sans titre)
 ggsave(file.path(fig_folder, "resiCLC.png"), width = 8, height = 6, dpi = 300)
 ```
 
@@ -391,33 +369,24 @@ ggsave(file.path(fig_folder, "resiCLC.png"), width = 8, height = 6, dpi = 300)
 
 
 
+# Evaluation du biais spatial en lien avec les zones bioclimatiques
 
+Objectif : comparer les distributions attendue et observée des observations en fonction de la zone bioclimatique en France métropolitaine.
 
+Distribution attendue = distribution des zones sur l'ensemble du territoire français métropolitain
 
+Distribution observée = distribution des zones au sein des données d'occurrence d'odonates
 
-
-
-
-
-
-
-
-
-
-
-
-
-## Etude du biais spatial des zones bioclimatiques
-
-### Distribution attendue
-
-Quelle proportion du territoire métropolitain est couverte par chaque zone bioclimatique ?
 
 Données issues de Metzger et al. 2013 https://doi.org/10.1111/geb.12022
 
--   raster zones bioclimatiques mondiales (à cropper sur la France métropole) : https://datashare.ed.ac.uk/handle/10283/3089
+-   raster zones bioclimatiques mondiales : https://datashare.ed.ac.uk/handle/10283/3089
 
 -   table de correspondance des zones bioclimatiques et leurs codes : fournie par Martin Jeanmougin (source ?)
+
+-   shapefile frontières France métropole : https://gadm.org/download_country.html
+
+### Distribution attendue
 
 ```{r}
 #| eval: false
@@ -489,8 +458,6 @@ ggplot(gens_obs) +
 
 ### Comparaison des distributions attendue et observée
 
-On va maintenant produire des graphiques et tableaux comparatifs des 2 distributions pour visualiser les biais, avant de tester statistiquement les différences de distribution des zones bioclimatiques.
-
 ```{r}
 # Joindre les 2 distributions par les labels des zones bioclimatiques
 gens_comp <- gens_obs[gens_exp, on = .(GEnS_v3_bioclim)][!is.na(N_obs) & !is.na(N_exp)]
@@ -516,21 +483,8 @@ gens_comp <- rbind(gens_comp[, -"rare"], autres, fill = TRUE)
 gens_comp <- gens_comp[order(-perc_exp)]
 
 # Traduire les noms des classes qui m'intéressent pour le graphique 
-
-gens_comp[, GEnS_v3_bioclim := as.character(GEnS_v3_bioclim)]  # au cas où
-
-gens_comp[, GEnS_v3_bioclim := fifelse(
-  GEnS_v3_bioclim == "J. Cool temperate and moist", "J. Tempéré frais et humide",
-  fifelse(
-    GEnS_v3_bioclim == "K. Warm temperate and mesic", "K. Tempéré chaud et mésique",
-    fifelse(
-      GEnS_v3_bioclim == "G. cold and mesic", "G. Froid et mésique",
-      GEnS_v3_bioclim
-    )
-  )
-)]
-
-
+gens_comp[, GEnS_v3_bioclim := as.character(GEnS_v3_bioclim)]
+gens_comp[, GEnS_v3_bioclim := fifelse(GEnS_v3_bioclim == "J. Cool temperate and moist", "J. Tempéré frais et humide", fifelse(GEnS_v3_bioclim == "K. Warm temperate and mesic", "K. Tempéré chaud et mésique", fifelse(GEnS_v3_bioclim == "G. cold and mesic", "G. Froid et mésique", GEnS_v3_bioclim)))]
 
 # Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
 gens_long <- melt(gens_comp,
@@ -554,32 +508,30 @@ ggplot(gens_long[!is.na(perc)], aes(x = reorder(GEnS_v3_bioclim, perc),
   theme(axis.text.y = element_text(size = 8, face = "italic"),
         legend.position = "top")
 
+# Sauvegarder la figure (sans titre)
 ggsave(file.path(fig_folder, "distribGENS.png"), width = 8, height = 6, dpi = 300)
-
 ```
-
-Rq : probablement que la zone méditerranée est importante dans les données opportunistes (plus d'sp sous contraintes, peut-être plus de suivis dans ces zones là) = effet vacances ie odonatologues opportunistes font des suivis hors de leur zone d'origine.
 
 ```{r}
 # Test du Khi² de conformité 
 khi2_gens <- chisq.test(x = gens_comp$N_obs, 
                         p = gens_comp$N_exp / sum(gens_comp$N_exp))
 khi2_gens
-# Mesure de la taille de l'effet
-fei(khi2_gens)
 ```
 
-Le test du khi² de conformité indique une différence significative entre la distribution observée des zones bioclimatiques et leur distribution attendue (X² = 30652, df = 2, p < 2.2e-16). Attention à l'interprétation de ce résultat, la grande taille d'échantillons rend le test très sensible, une p-value significative ne signifie pas forcément la présence une différence pertinente d'un point de vue écologique. L'indice FEI (Frequency Effect Index) associé suggère une déviation globale très faible par rapport à la distribution théorique (FEI = 0.04), elle ne reflète pas une différence écologique pertinente.
+Le test du khi² de conformité indique une différence significative entre la distribution observée des zones bioclimatiques et leur distribution attendue (X² = 41472, df = 2, p \< 2.2e-16).
 
-### Contributions des classes au Khi² 
+### Contributions des classes au Khi²
 
 ```{r}
 #Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
 scaling_factor <- sum(gens_comp$N_obs) / sum(gens_comp$N_exp)
 gens_comp[, N_exp_scaled := N_exp * scaling_factor]
+
 # Calcul de la contribution des classes au khi² (en %)
 gens_comp[, contrib_khi2 := (N_obs - N_exp_scaled)^2 / N_exp_scaled]
 gens_comp[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)][order(-contrib_khi2)]
+
 # Visualiser les contributions
 ggplot(gens_comp, aes(x = contrib_khi2_perc, 
                       y = reorder(GEnS_v3_bioclim, contrib_khi2_perc))) +
@@ -587,6 +539,7 @@ ggplot(gens_comp, aes(x = contrib_khi2_perc,
   labs(x = "Contribution au khi² (%)",
        title = "Contribution de chaque zones bioclim au test du khi²") +
   theme_minimal(base_size = 14)
+
 # Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
 gens_comp[, deviation := khi2_gens$stdres]
 ggplot(gens_comp, aes(x = deviation, 
@@ -603,19 +556,7 @@ ggplot(gens_comp, aes(x = deviation,
     plot.title = element_blank(),
     legend.position = "top"
   )
-ggsave(file.path(fig_folder, "distribGENS.png"), width = 8, height = 6, dpi = 300)
+
+# Sauvegarder la figure (sans titre)
+ggsave(file.path(fig_folder, "resiGENS.png"), width = 8, height = 6, dpi = 300)
 ```
-
-Ce graphique permet de savoir quelles zones bioclimatiques sont sur ou sous-représentées dans les données, mais c'est à remettre en contexte, le FEI montre que la différence entre les distributions observées et attendues n'est pas significative écologiquement parlant. C'est-à-dire qu'il y a un biais oui, mais il n'est pas assez important pour qu'on s'en inquiète réellement. A vérifier. 
-
-
-## Figure pour rapport
-
-
-
-
-```{r}
-
-```
-
-

@@ -15,6 +15,7 @@ editor: visual
 library(here)
 library(data.table)
 library(ggplot2)
+library(gt)
 
 # Chemins
 read_folder <- here("data/03_grid")
@@ -188,154 +189,90 @@ ggplot(datN_ge) +
   theme(axis.title.x = element_blank())
 ```
 
-### Provence-Alpes-Côte d'Azur
+### Tableau de décision basé sur critère de \>200 obs
 
 ```{r}
-# Filtrer une région + 2011-2024
-dat_paca <- dat[region=="Provence-Alpes-Côte d'Azur"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+# Comptage observations par région et année
+tab <- dat_steli[, .N, by = .(region, year = year(eventDate))]
 
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_paca <- dat_paca[, .N, by = list(source, year(dat_paca$eventDate))]
-ggplot(datN_paca) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Provence-Alpes-Côte d'Azur", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
+# Table large : années en colonnes
+tab_wide <- dcast(tab, region ~ year, value.var = "N", fill = 0)
+
+# tableau gt avec surbrillance cellules >= 200
+gt_table <- gt(tab_wide) %>%
+  tab_header(title = "Nombre d'observations STELI par région et par an")
+for (col in as.character(2011:2024)) {
+  gt_table <- gt_table %>%
+    tab_style(
+      style = cell_fill(color = "lightgreen"),
+      locations = cells_body(columns = col, rows = tab_wide[[col]] >= 200
+      )
+    )
+}
+gt_table
 ```
 
-### Centre-Val de Loire
+### Tableau de décision basé sur critère de >5 "sites"
 
 ```{r}
-# Filtrer une région + 2011-2024
-dat_cvl <- dat[region=="Centre-Val de Loire"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+# Comptage sites (id_1000) par région et année
+tab_sites <- dat_steli[, .(n_sites = uniqueN(id_1000)), by = .(region, year = year(eventDate))]
 
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_cvl <- dat_cvl[, .N, by = list(source, year(dat_cvl$eventDate))]
-ggplot(datN_cvl) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Centre-Val de Loire", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
+# Table large : années en colonnes
+tab_sites_wide <- dcast(tab_sites, region ~ year, value.var = "n_sites", fill = 0)
+
+# tableau gt avec surbrillance cellules >= 200
+gt_table <- gt(tab_sites_wide) %>%
+  tab_header(title = "Nombre de sites STELI (id_1000) par région et par an")
+for (col in as.character(2011:2024)) {
+  gt_table <- gt_table %>%
+    tab_style(
+      style = cell_fill(color = "lightgreen"),
+      locations = cells_body(
+        columns = col,
+        rows = tab_sites_wide[[col]] >= 5
+      )
+    )
+}
+
+gt_table
 ```
 
-### Île-de-France
+## Comparer la distribution des espèces entre les données STELI et ATLAS
+
+### Groupe Sud 1 : Nouvelle-Aquitaine + Occitanie (2016-2018)
 
 ```{r}
-# Filtrer une région + 2011-2024
-dat_idf <- dat[region=="Île-de-France"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+# Filtrage
+dat_s1 <- dat[region %in% c("Nouvelle-Aquitaine", "Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2018-12-31")]
 
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_idf <- dat_idf[, .N, by = list(source, year(dat_idf$eventDate))]
-ggplot(datN_idf) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Île-de-France", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Comparer la distribution des espèces entre les données STELI et ATLAS (données non filtrées !!)
-
-```{r}
 # Table croisée espèces × source
-table_species <- dat[, .N, by = .(scientificName, source)] |>
+table_species_s1 <- dat_s1[, .N, by = .(scientificName, source)] |>
   dcast(scientificName ~ source, value.var = "N", fill = 0)
 
 # Supprimer les espèces absentes des deux jeux de données
-table_species <- table_species[atlas + STELI > 0]
+table_species_s1 <- table_species_s1[atlas + STELI > 0]
 
 # Créer la table de contingence
-mat <- as.matrix(table_species[, .(atlas, STELI)])
-rownames(mat) <- table_species$species_name
+mat_s1 <- as.matrix(table_species_s1[, .(atlas, STELI)])
+rownames(mat_s1) <- table_species_s1$species_name
 
 # Test du chi² d’indépendance
-test_chi2 <- chisq.test(mat)
-test_chi2
+test_chi2_s1 <- chisq.test(mat_s1)
+test_chi2_s1
 ```
 
 ```{r}
-# Ajouter les proportions
-table_species[, `:=`(
-  prop_atlas = atlas / sum(atlas),
-  prop_steli = STELI / sum(STELI)
-)]
+# Résidus standardisés
+residus_s1 <- test_chi2_s1$stdres
+table_species_s1[, `:=`(residus_atlas = residus_s1[, "atlas"])]
+table_species_s1[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
 
-# Format long pour ggplot
-table_prop_long <- melt(table_species[, .(scientificName, prop_atlas, prop_steli)],
-                        id.vars = "scientificName",
-                        variable.name = "source", value.name = "proportion")
+# Top 30 des espèces les plus biaisées
+top_bias_s1 <- table_species_s1[order(-abs(residus_atlas))][1:30]
 
-# Renommer les labels
-table_prop_long[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
-
-# Barplot des proportions par espèce
-ggplot(table_prop_long, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
-  geom_col(position = "dodge") +
-  coord_flip() +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
-  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source",
-       title = "Distribution relative des observations par espèce") +
-  theme_minimal(base_size = 13) +
-  theme(axis.text.y = element_text(size = 7, face = "italic"),
-        legend.position = "top")
-```
-
-```{r}
-# Résidus standardisés : signalent les espèces sur/sous-représentées
-residus <- test_chi2$stdres
-
-# Ajouter les résidus dans la table (ici pour atlas uniquement) 
-table_species[, `:=`(residus_atlas = residus[, "atlas"])]
-
-# Calculer la déviation (sens du biais)
-table_species[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
-
-# Sélection des 50 espèces avec les plus grands biais (en absolu)
-top_bias_atlas <- table_species[order(-abs(residus_atlas))][1:30]
-
-# Graphique
-ggplot(top_bias_atlas, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+# Graphique sur-/sous-représentation des espèces dans l'atlas vs steli
+ggplot(top_bias_s1, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
   geom_col() +
   coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
@@ -349,4 +286,527 @@ ggplot(top_bias_atlas, aes(x = reorder(scientificName, abs(residus_atlas)), y = 
     axis.text.y = element_text(size = 8, face = "italic"),
     legend.position = "top"
   )
+
+# Calcul des proportions globales des espèces
+table_species_s1[, `:=`(
+  prop_atlas = atlas / sum(atlas),
+  prop_steli = STELI / sum(STELI)
+)]
+
+# Format long
+table_prop_long_s1 <- melt(
+  table_species_s1[scientificName %in% top_bias_s1$scientificName, 
+                   .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName",
+  variable.name = "source", value.name = "proportion"
+)
+table_prop_long_s1[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique proportions
+ggplot(table_prop_long_s1, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source",
+       title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"),
+        legend.position = "top")
+```
+
+### Groupe Nord 1 : Hauts-de-France + Grand Est (2015-2017)
+
+```{r}
+# Filtrage
+dat_n1 <- dat[region %in% c("Hauts-de-France", "Grand Est") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2017-12-31")]
+
+# Table croisée espèces × source
+table_species_n1 <- dat_n1[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Supprimer les espèces absentes des deux jeux de données
+table_species_n1 <- table_species_n1[atlas + STELI > 0]
+
+# Créer la table de contingence
+mat_n1 <- as.matrix(table_species_n1[, .(atlas, STELI)])
+rownames(mat_n1) <- table_species_n1$species_name
+
+# Test du chi² d’indépendance
+test_chi2_n1 <- chisq.test(mat_n1)
+test_chi2_n1
+```
+
+```{r}
+# Résidus standardisés
+residus_n1 <- test_chi2_n1$stdres
+table_species_n1[, `:=`(residus_atlas = residus_n1[, "atlas"])]
+table_species_n1[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_n1 <- table_species_n1[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation des espèces dans l'atlas vs steli
+ggplot(top_bias_n1, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales des espèces
+table_species_n1[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long
+table_prop_long_n1 <- melt(
+  table_species_n1[scientificName %in% top_bias_n1$scientificName, .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
+)
+table_prop_long_n1[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique proportions
+ggplot(table_prop_long_n1, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+### Groupe Nord 2 : Hauts-de-France + Normandie (2012-2013)
+
+```{r}
+# Filtrage
+dat_n2 <- dat[region %in% c("Hauts-de-France", "Normandie") & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Table croisée espèces × source
+table_species_n2 <- dat_n2[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Supprimer les espèces absentes des deux jeux de données
+table_species_n2 <- table_species_n2[atlas + STELI > 0]
+
+# Créer la table de contingence
+mat_n2 <- as.matrix(table_species_n2[, .(atlas, STELI)])
+rownames(mat_n2) <- table_species_n2$species_name
+
+# Test du chi² d’indépendance
+test_chi2_n2 <- chisq.test(mat_n2)
+test_chi2_n2
+```
+
+```{r}
+# Résidus standardisés
+residus_n2 <- test_chi2_n2$stdres
+table_species_n2[, `:=`(residus_atlas = residus_n2[, "atlas"])]
+table_species_n2[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_n2 <- table_species_n2[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation des espèces dans l'atlas vs steli
+ggplot(top_bias_n2, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales des espèces
+table_species_n2[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long
+table_prop_long_n2 <- melt(
+  table_species_n2[scientificName %in% top_bias_n2$scientificName, .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
+)
+table_prop_long_n2[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique proportions
+ggplot(table_prop_long_n2, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+
+
+
+
+
+
+
+### Hauts-de-France (2011-2019)
+
+```{r}
+# Filtrage
+dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2019-12-31")]
+
+# Table croisée espèces × source
+table_species_hdf <- dat_hdf[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Supprimer les espèces absentes des deux jeux de données
+table_species_hdf <- table_species_hdf[atlas + STELI > 0]
+
+# Créer la table de contingence
+mat_hdf <- as.matrix(table_species_hdf[, .(atlas, STELI)])
+rownames(mat_hdf) <- table_species_hdf$scientificName
+
+# Test du chi² d’indépendance
+test_chi2_hdf <- chisq.test(mat_hdf)
+test_chi2_hdf
+```
+
+```{r}
+# Résidus standardisés
+residus_hdf <- test_chi2_hdf$stdres
+table_species_hdf[, `:=`(residus_atlas = residus_hdf[, "atlas"])]
+table_species_hdf[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_hdf <- table_species_hdf[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation
+ggplot(top_bias_hdf, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() + coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation",
+       title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Proportions globales
+table_species_hdf[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long
+table_prop_long_hdf <- melt(
+  table_species_hdf[scientificName %in% top_bias_hdf$scientificName, .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
+)
+table_prop_long_hdf[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique proportions
+ggplot(table_prop_long_hdf, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") + coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source",
+       title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+### Normandie (2012–2013)
+
+```{r}
+# Filtrage
+dat_nor <- dat[region %in% c("Normandie") & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Table croisée espèces × source
+table_species_nor <- dat_nor[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Supprimer les espèces absentes des deux jeux de données
+table_species_nor <- table_species_nor[atlas + STELI > 0]
+
+# Créer la table de contingence
+mat_nor <- as.matrix(table_species_nor[, .(atlas, STELI)])
+rownames(mat_nor) <- table_species_nor$scientificName
+
+# Test du chi² d’indépendance
+test_chi2_nor <- chisq.test(mat_nor)
+test_chi2_nor
+```
+
+```{r}
+# Résidus standardisés
+residus_nor <- test_chi2_nor$stdres
+table_species_nor[, `:=`(residus_atlas = residus_nor[, "atlas"])]
+table_species_nor[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_nor <- table_species_nor[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation des espèces dans l'atlas vs steli
+ggplot(top_bias_nor, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() + coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales des espèces
+table_species_nor[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long
+table_prop_long_nor <- melt(table_species_nor[scientificName %in% top_bias_nor$scientificName, .(scientificName, prop_atlas, prop_steli)],
+                            id.vars = "scientificName", variable.name = "source", value.name = "proportion")
+table_prop_long_nor[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique proportions
+ggplot(table_prop_long_nor, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") + coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+### Grand Est (2015–2017)
+
+```{r}
+# Filtrage
+dat_ge <- dat[region %in% c("Grand Est") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2017-12-31")]
+
+# Table croisée espèces × source
+table_species_ge <- dat_ge[, .N, by = .(scientificName, source)] |> dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Supprimer les espèces absentes des deux jeux de données
+table_species_ge <- table_species_ge[atlas + STELI > 0]
+
+# Créer la table de contingence
+mat_ge <- as.matrix(table_species_ge[, .(atlas, STELI)])
+rownames(mat_ge) <- table_species_ge$scientificName
+
+# Test du chi² d’indépendance
+test_chi2_ge <- chisq.test(mat_ge)
+test_chi2_ge
+```
+
+```{r}
+# Résidus standardisés
+residus_ge <- test_chi2_ge$stdres
+table_species_ge[, `:=`(residus_atlas = residus_ge[, "atlas"])]
+table_species_ge[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_ge <- table_species_ge[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation des espèces dans l'atlas vs steli
+ggplot(top_bias_ge, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() + coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales des espèces
+table_species_ge[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long
+table_prop_long_ge <- melt(table_species_ge[scientificName %in% top_bias_ge$scientificName, .(scientificName, prop_atlas, prop_steli)],
+                           id.vars = "scientificName", variable.name = "source", value.name = "proportion")
+table_prop_long_ge[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique proportions
+ggplot(table_prop_long_ge, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") + coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+### Auvergne-Rhône-Alpes (2013–2019)
+
+```{r}
+# Filtrage des données
+dat_ara <- dat[region %in% c("Auvergne-Rhône-Alpes") & eventDate >= as.IDate("2013-01-01") & eventDate <= as.IDate("2019-12-31")]
+
+# Table croisée espèces × source
+table_species_ara <- dat_ara[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Suppression des espèces absentes des deux jeux
+table_species_ara <- table_species_ara[atlas + STELI > 0]
+
+# Table de contingence
+mat_ara <- as.matrix(table_species_ara[, .(atlas, STELI)])
+rownames(mat_ara) <- table_species_ara$species_name
+
+# Test du chi²
+test_chi2_ara <- chisq.test(mat_ara)
+test_chi2_ara
+```
+
+```{r}
+# Résidus standardisés
+residus_ara <- test_chi2_ara$stdres
+table_species_ara[, `:=`(residus_atlas = residus_ara[, "atlas"])]
+table_species_ara[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_ara <- table_species_ara[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation
+ggplot(top_bias_ara, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales
+table_species_ara[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long pour graphique
+table_prop_long_ara <- melt(
+  table_species_ara[scientificName %in% top_bias_ara$scientificName, .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
+)
+table_prop_long_ara[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique des proportions
+ggplot(table_prop_long_ara, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+
+```
+
+### Région : Nouvelle-Aquitaine (2012–2019)
+
+```{r}
+# Filtrage des données
+dat_naq <- dat[region %in% c("Nouvelle-Aquitaine") & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2019-12-31")]
+
+# Table croisée espèces × source
+table_species_naq <- dat_naq[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Suppression des espèces absentes des deux jeux
+table_species_naq <- table_species_naq[atlas + STELI > 0]
+
+# Table de contingence
+mat_naq <- as.matrix(table_species_naq[, .(atlas, STELI)])
+rownames(mat_naq) <- table_species_naq$species_name
+
+# Test du chi²
+test_chi2_naq <- chisq.test(mat_naq)
+test_chi2_naq
+```
+
+```{r}
+# Résidus standardisés
+residus_naq <- test_chi2_naq$stdres
+table_species_naq[, `:=`(residus_atlas = residus_naq[, "atlas"])]
+table_species_naq[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_naq <- table_species_naq[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation
+ggplot(top_bias_naq, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales
+table_species_naq[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long pour graphique
+table_prop_long_naq <- melt(
+  table_species_naq[scientificName %in% top_bias_naq$scientificName, .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
+)
+table_prop_long_naq[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique des proportions
+ggplot(table_prop_long_naq, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+### Occitanie (2016–2018)
+
+```{r}
+# Filtrage des données
+dat_occ <- dat[region %in% c("Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2018-12-31")]
+
+# Table croisée espèces × source
+table_species_occ <- dat_occ[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
+
+# Suppression des espèces absentes des deux jeux
+table_species_occ <- table_species_occ[atlas + STELI > 0]
+
+# Table de contingence
+mat_occ <- as.matrix(table_species_occ[, .(atlas, STELI)])
+rownames(mat_occ) <- table_species_occ$species_name
+
+# Test du chi²
+test_chi2_occ <- chisq.test(mat_occ)
+test_chi2_occ
+```
+
+```{r}
+# Résidus standardisés
+residus_occ <- test_chi2_occ$stdres
+table_species_occ[, `:=`(residus_atlas = residus_occ[, "atlas"])]
+table_species_occ[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+
+# Top 30 des espèces les plus biaisées
+top_bias_occ <- table_species_occ[order(-abs(residus_atlas))][1:30]
+
+# Graphique sur-/sous-représentation
+ggplot(top_bias_occ, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+
+# Calcul des proportions globales
+table_species_occ[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
+
+# Format long pour graphique
+table_prop_long_occ <- melt(
+  table_species_occ[scientificName %in% top_bias_occ$scientificName, .(scientificName, prop_atlas, prop_steli)],
+  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
+)
+table_prop_long_occ[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
+
+# Graphique des proportions
+ggplot(table_prop_long_occ, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
+  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+```
+
+## Phénologie : s'assurer que l'effort de collecte STELI est homogène mois par mois sur plusieurs années
+
+### Hauts-de-France (2011-2019)
+
+```{r}
+# Filtrage
+dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2019-12-31")]
 ```

@@ -28,7 +28,7 @@ library(broom)
 library(flextable)
 
 # Chemins
-read_folder <- here("data/04_aggregate_by_grid")
+read_folder <- here("data/05_aggregate_by_grid")
 gisdata_folder <- here("data/gis")
 fig_folder <- here("figures/rapport_stage_M1_TMP")
 
@@ -136,7 +136,7 @@ summary(mod.pois)
 summary(mod.pois)$deviance / summary(mod.pois)$df.residual
 ```
 
-Le ratio residual deviance / ddl est égal à 468.8812. Ce ratio est très largement supérieur à 1 et permet de mettre en évidence la présence d’une surdispersion massive. Le modèle de Poisson est fortement biaisé, il est donc nécessaire d’utiliser une autre structure d’erreur dans le modèle de régression.
+Le ratio residual deviance / ddl est égal à 564.4. Ce ratio est très largement supérieur à 1 et permet de mettre en évidence la présence d’une surdispersion massive. Le modèle de Poisson est fortement biaisé, il est donc nécessaire d’utiliser une autre structure d’erreur dans le modèle de régression.
 
 ## Ajustement du modèle à une structure d'erreur différente
 
@@ -152,13 +152,7 @@ Les estimateurs sont identiques à ceux du modèle de Poisson, les erreurs stand
 ### Structure d'erreur binomiale négative
 
 ```{r}
-grille_data$popdensity <- grille_data$popdensity_hab_per_km2 / 500
-grille_data$elevation <- grille_data$elevation_m / 500
-```
-
-
-```{r}
-mod.nb <- glm.nb(nobs ~ popdensity + elevation + main_clc, data = grille_data)
+mod.nb <- glm.nb(nobs ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = grille_data)
 summary(mod.nb)
 summary(mod.nb)$deviance / summary(mod.nb)$df.residual
 ```
@@ -176,7 +170,7 @@ testDispersion(simu_res)
 testOutliers(simu_res, type = "bootstrap")
 ```
 
-Les tests du diagnostic DHARMa sont significatifs, ils indiquent une légère surdispersion résiduelle (dispersion = 1.9567, p-value = 0.032) et moins de 1% de valeurs aberrantes (outliers at both margins = 53 / 5701 = 0,0093 ; p \< 2.2e-16).
+Les tests du diagnostic DHARMa sont significatifs, ils indiquent une légère surdispersion résiduelle (dispersion = 1.9529, p-value = 0.036) et moins de 1% de valeurs aberrantes (outliers at both margins = 55 / 5718 = 0,0096 ; p \< 2.2e-16).
 
 La taille de l'échantillon augmente la sensibilité des tests, il vaut donc mieux se fier à l'interprétation visuelle. La distribution observée des résidus suit leur distribution attendue sans déviation majeure (QQ plot residuals), et il ne semble pas y avoir d’effet non-modélisé ou de non-linéarité claire (DHARMa residual vs. predicted).
 
@@ -218,54 +212,19 @@ Par soucis de temps, on ne va pas pousser la démarche d'ajustement du modèle p
 ## Interprétation des résultats du modèle binomial négatif
 
 ```{r}
-tbl <- mod.nb |> gtsummary::tbl_regression(exponentiate = TRUE, intercept = TRUE)
-flextable::save_as_docx(
-  as_flex_table(tbl),
-  path = here("figures/rapport_stage_M1_TMP", "tableau_glm.docx")
-)
+# Pour interpréter les coefficients on ajuste l'échelle des variables explicatives
+grille_data$popdensity <- grille_data$popdensity_hab_per_km2 / 1000
+grille_data$elevation <- grille_data$elevation_m / 100
+mod.nb <- glm.nb(nobs ~ popdensity + elevation + main_clc, data = grille_data)
+summary(mod.nb)
+summary(mod.nb)$deviance / summary(mod.nb)$df.residual
 ```
 
-```{r}
-# Extraire les résultats
-results <- tidy(mod.nb, conf.int = TRUE) |>
-  mutate(
-    `Coefficient brut` = estimate,
-    `Exponentielle du coefficient` = exp(estimate),
-    `Erreur standard` = std.error,
-    `Valeur p` = p.value
-  ) |>
-  select(
-    Variable = term,
-    `Coefficient brut`,
-    `Exponentielle du coefficient`,
-    `Erreur standard`,
-    `Valeur p`
-  )
-
-# Renommer les variables si souhaité (optionnel)
-results$Variable <- recode(results$Variable,
-  "(Intercept)" = "Intercept",
-  "popdensity_hab_per_km2" = "Densité de population",
-  "elevation_m" = "Altitude",
-  "main_clcCLC_agri_intensive" = "Milieux agricoles intensifs",
-  "main_clcCLC_agri_seminat" = "Milieux agricoles semi-naturels",
-  "main_clcCLC_forest" = "Forêts",
-  "main_clcCLC_open_seminat" = "Milieux ouverts semi-naturels",
-  "main_clcCLC_urban" = "Milieux urbains"
-)
-
-# Export au format Word
-save_as_docx(
-  flextable(results),
-  path = here("figures/rapport_stage_M1_TMP", "tableau_glm_complet.docx")
-)
-```
-
-
-Discussion : la proportion d'hab explique partiellement l'urbanisation donc les 2 variables sont liées ? faire un graph de densité de pop en fonction de clc. Même pour altitude, vérifier la corrélation entre les variables, graph ? test? terme d'interaction (interaction des effets entre 2 var explicatives) ? En tout cas en discuter pour l'interprétation des résultats
-
+Voir dans le rapport de stage pour un tableau des résultats du GLM au propre.
 
 ```{r}
+# Générer des figures propres des diagnostics DHARMa pour le rapport
+
 # Simuler les résidus
 simu_res <- simulateResiduals(fittedModel = mod.nb, n = 1000, plot = FALSE)
 
@@ -275,9 +234,9 @@ plotQQunif(
   simu_res,
   main = "",
   cex = 1.2,
-  testUniformity = FALSE,   # enlève le test KS
-  testOutliers = FALSE,     # enlève le test des outliers
-  testDispersion = FALSE    # enlève le test de surdispersion
+  testUniformity = FALSE,
+  testOutliers = FALSE,
+  testDispersion = FALSE
 )
 dev.off()
 
@@ -286,6 +245,4 @@ png(file.path(fig_folder, "residus_pred.png"), width = 1600, height = 1200, res 
 plotResiduals(simu_res, form = simu_res$predictedResponse,
               main = "", xlab = "Valeurs prédites", ylab = "Résidus simulés")
 dev.off()
-
 ```
-
