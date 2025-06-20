@@ -1,0 +1,240 @@
+---
+title: "spatial_bias_analysis"
+format:
+  html:
+    number-sections: true
+    embed-resources: true
+editor: visual
+---
+
+## Bibliothèques, chemins, chargement des données
+
+```{r}
+# Bibliothèques
+#| warning: false
+library(here)
+library(data.table)
+library(DT)
+library(dplyr)
+library(ggplot2)
+
+library(rnaturalearth)
+library(terra)
+library(sf)
+
+library(car)
+library(MASS)
+library(DHARMa)
+
+# Chemins
+read_folder1 <- here("data/04_gis_info/data")
+read_folder2 <- here("data/05_aggregate_by_grid")
+grid_folder <- here("data/03_grid")
+gisdata_folder <- here("data/gis")
+fig_folder <- here("figures/rapport_stage_M1_TMP")
+```
+
+# Analyse exploratoire
+
+## Prétraitement des données
+
+```{r}
+# Chargement des données
+dat <- readRDS(file.path(read_folder1, "french_odonate_data.rds"))
+
+# Filtrage des données entre 1990 et 2018 inclus
+dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-31")]
+```
+
+```{r}
+## Création d'un ID session ATLAS
+
+# Vérifier les valeurs manquantes ou peu informative dans les métadonnées 
+dat_atlas[, .(
+  n_total = .N,
+  n_NA_eventDate = sum(is.na(eventDate)),
+  n_NA_recordedBy = sum(is.na(recordedBy) | recordedBy %in% c("Anon", "", NA)),
+  n_NA_coords = sum(is.na(decimalLongitude) | is.na(decimalLatitude))
+)]
+
+# Nettoyer recordedBy
+dat[, recordedBy_clean := tolower(trimws(recordedBy))]
+dat[is.na(recordedBy_clean) | recordedBy_clean %in% c("anon", ""), recordedBy_clean := "unknown"]
+
+# Arrondir les coordonnées à 100 m
+dat[, `:=`(
+  x_round = round(x_ETRS89_LAEA, -2),
+  y_round = round(y_ETRS89_LAEA, -2)
+)]
+
+# Créer ID uniquement pour sessions ATLAS
+dat[source == "atlas", id_ses_atlas := ifelse(
+  recordedBy_clean == "unknown",
+  paste(eventDate, x_round, y_round, sep = "_"),
+  paste(eventDate, recordedBy_clean, x_round, y_round, sep = "_")
+)]
+
+# Vérification : résumé des sessions créées
+cat("Nombre total de sessions atlas recréées :", dat[source == "atlas", uniqueN(id_ses_atlas)], "\n")
+cat("Nombre d'observations sans id_ses_atlas :", dat[source == "atlas" & is.na(id_ses_atlas), .N], "\n")
+
+# Vérification : Histogramme nombre d'observations par session atlas
+session_obs_counts <- dat[source == "atlas", .N, by = id_ses_atlas]
+ggplot(session_obs_counts, aes(x = N)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  scale_x_continuous() +
+  labs(
+    title = "Distribution du nombre d'observations par session (Atlas)",
+    x = "Nombre d'observations",
+    y = "Nombre de sessions"
+  ) + xlim(0,20) +
+  theme_minimal(base_size = 14)
+```
+
+```{r}
+# Créer une colonne d'ID session générique 
+dat[, id_session := fifelse(source == "atlas", id_ses_atlas, id_ses)]
+dat <- dat[!is.na(id_session)]
+```
+
+
+## Evaluation du biais spatial en lien avec l'occupation des sols
+
+Objectif : comparer les distributions attendue et observée des observations en fonction du mode d'occupation des sols en France métropolitaine.
+
+Distribution attendue = distribution des classes d'occupation des sols sur l'ensemble du territoire français métropolitain
+
+Distribution observée = distribution des classes d'occupation des sols au sein des données d'occurrence d'odonates
+
+Données :
+
+-   raster CLC2018 100m (France métropole + outre mer) :  https://land.copernicus.eu/en/products/corine-land-cover/clc2018
+
+-   shapefile frontières France métropole : https://gadm.org/download_country.html
+
+Pour l'agrégation des classes CLC, se référer à la page : https://land.copernicus.eu/content/corine-land-cover-nomenclature-guidelines/html/
+
+### Distribution attendue
+
+```{r}
+#| eval: false
+# Importer le vecteur France métropole
+fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
+# Importer le raster CLC2018 100m
+clc <- rast(here(gisdata_folder, "180451","Results","u2018_clc2018_v2020_20u1_raster100m","u2018_clc2018_v2020_20u1_raster100m","DATA","U2018_CLC2018_V2020_20u1.tif"))
+# Reprojetter le vecteur pour le superposer au raster
+fr_3035 <- project(fr, crs(clc))
+# Couper le raster aux frontières de la métropole
+clc_fr <- crop(clc, fr_3035, mask=TRUE)
+# Récupérer les valeurs de chaque pixel et compter leur fréquence
+clc_values <- values(clc_fr)
+nclc <- table(clc_values)
+# Calculer la proportion du territoire métropolitain couverte par chaque classe CLC
+france_clc <- data.frame(
+  "CLC2018_landcover"=levels(clc)[[1]]$LABEL3[levels(clc)[[1]]$Value%in%names(nclc)],
+  "N_exp"=as.numeric(nclc),
+  "perc_exp"=round(as.numeric(nclc)/sum(nclc)*100,3)
+)
+# Stocker le résultat dans un CSV
+write.csv(france_clc, 
+  here::here(grid_folder, "france_clc2018_100m.csv"), row.names=FALSE)
+```
+
+```{r}
+# Création d'une nouvelle colonne de regroupement dans clc_expected
+clc_expected[, landcover_groups := fcase(
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites", "Green urban areas", "Sport and leisure facilities"),
+  "Zones urbanisées et artificielles",
+
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Rice fields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  "Zones agricoles intensives",
+
+  CLC2018_landcover %in% c("Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
+  "Zones agricoles semi-naturelles",
+
+  CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
+  "Forêts",
+
+  CLC2018_landcover %in% c("Pastures", "Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
+  "Milieux ouverts semi-naturels",
+  
+  CLC2018_landcover %in% c("Inland marshes", "Peat bogs",  "Water courses", "Water bodies", "Salt marshes", "Salines", "Intertidal flats"),
+  "Milieux aquatiques",
+  
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean", "Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Autres",
+
+  default = "NODATA"
+)]
+clc_expected <- clc_expected[!is.na(CLC2018_landcover) & CLC2018_landcover != "NODATA"]
+
+# Agréger les effectifs par landcover_groups
+landcover_groups_expected <- clc_expected[, .(N_exp = sum(N_exp, na.rm = TRUE)), by = landcover_groups]
+# Calculer les perc_exp par groupe
+landcover_groups_expected[, perc_exp := 100 * N_exp / sum(N_exp)]
+# Afficher le résultat
+landcover_groups_expected |> datatable()
+# Barplot
+ggplot(landcover_groups_expected) +
+  geom_col(aes(x = N_exp, 
+               y = reorder(landcover_groups, N_exp)), fill = "darkorange") +
+  xlab("Nombre d'occurrences") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+
+### Distribution observée 
+
+```{r}
+# Création d'une nouvelle colonne de regroupement dans dat
+dat <- as.data.table(dat)
+dat[, landcover_groups := fcase(
+  CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites", "Green urban areas", "Sport and leisure facilities"),
+  "Zones urbanisées et artificielles",
+
+  CLC2018_landcover %in% c("Non-irrigated arable land", "Permanently irrigated land", "Rice fields", "Vineyards", "Fruit trees and berry plantations", "Olive groves"),
+  "Zones agricoles intensives",
+
+  CLC2018_landcover %in% c("Annual crops associated with permanent crops", "Complex cultivation patterns", "Land principally occupied by agriculture, with significant areas of natural vegetation", "Agro-forestry areas"),
+  "Zones agricoles semi-naturelles",
+
+  CLC2018_landcover %in% c("Broad-leaved forest", "Coniferous forest", "Mixed forest"),
+  "Forêts",
+
+  CLC2018_landcover %in% c("Pastures", "Natural grasslands", "Moors and heathland", "Sclerophyllous vegetation", "Transitional woodland-shrub"),
+  "Milieux ouverts semi-naturels",
+  
+  CLC2018_landcover %in% c("Inland marshes", "Peat bogs",  "Water courses", "Water bodies", "Salt marshes", "Salines", "Intertidal flats"),
+  "Milieux aquatiques",
+  
+  CLC2018_landcover %in% c("Coastal lagoons", "Estuaries", "Sea and ocean", "Beaches, dunes, sands", "Bare rocks", "Sparsely vegetated areas", "Burnt areas", "Glaciers and perpetual snow"),
+  "Autres",
+
+  default = "NODATA"
+)]
+
+# Agréger les sessions par landcover_groups
+landcover_groups_observed <- dat[, .(n_sessions = uniqueN(id_session)), by = landcover_groups]
+
+# Calculer les perc_obs par groupe
+landcover_groups_observed[, perc_obs := 100 * n_sessions / sum(n_sessions)]
+landcover_groups_observed <- landcover_groups_observed[order(-n_sessions)]
+landcover_groups_observed |> datatable()
+
+# Barplot
+ggplot(landcover_groups_observed) +
+  geom_col(aes(x = N_obs, 
+               y = reorder(landcover_groups, N_obs)), fill = "darkorange") +
+  xlab("Nombre de sessions d'observations") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+

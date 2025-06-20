@@ -7,7 +7,7 @@ format:
 editor: visual
 ---
 
-## Bibliothèques, chemins, chargement des données
+# Bibliothèques, chemins, chargement des données
 
 ```{r}
 # Bibliothèques
@@ -28,6 +28,7 @@ fig_folder <- here("figures/taxo")
 # Chargement des données
 dat <- readRDS(file.path(read_folder, "french_odonate_data.rds"))
 ```
+# Traitement des données pour l'analyse du biais taxonomique
 
 ## Correction des noms d'espèces pour éviter les synonymes
 
@@ -41,16 +42,16 @@ dat <- merge(dat, taxo_corrections, by = "verbatimName", all.x = TRUE)
 # Remplacer scientificName par correctedName si disponible
 dat[, scientificName := ifelse(!is.na(correctedName), correctedName, scientificName)]
 
-# Nettoyage : supprimer la colonne temporaire correctedName + supprimer les identifications autres qu'au niveau espèce
+# Nettoyage : supprimer la colonne temporaire correctedName + supprimer les identifications de niveau taxonomique différent de l'espèce
 dat[, correctedName := NULL]
-dat <- dat[grepl(" ", scientificName)]
+dat <- dat[taxonRank == "SPECIES"]
 
 # Vérification
 dat[, .N, by = scientificName][order(-N)]
 dat[, .N, by = verbatimName][order(-N)]
 ```
 
-# Traitement des données pour l'analyse du biais taxonomique
+## Nettoyage données sans région 
 
 ```{r}
 # Filtrer les données sans région affiliée
@@ -65,214 +66,92 @@ dat_steli[, .N, by = region][order(-N)]
 dat_atlas[, .N, by = region][order(-N)]
 ```
 
-## Choix des fenêtres spatio-temporelles d'étude
-
-### Hauts-de-France
+## Création d'un ID session ATLAS
 
 ```{r}
-# Filtrer une région + 2011-2024
-dat_hdf <- dat[region=="Hauts-de-France"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+# Vérifier les valeurs manquantes ou peu informative dans les métadonnées 
+dat_atlas[, .(
+  n_total = .N,
+  n_NA_eventDate = sum(is.na(eventDate)),
+  n_NA_recordedBy = sum(is.na(recordedBy) | recordedBy %in% c("Anon", "", NA)),
+  n_NA_coords = sum(is.na(decimalLongitude) | is.na(decimalLatitude))
+)]
 
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_hdf <- dat_hdf[, .N, by = list(source, year(dat_hdf$eventDate))]
-ggplot(datN_hdf) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Hauts-de-France", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
+# Nettoyer recordedBy
+dat[, recordedBy_clean := tolower(trimws(recordedBy))]
+dat[is.na(recordedBy_clean) | recordedBy_clean %in% c("anon", ""), recordedBy_clean := "unknown"]
+
+# Arrondir les coordonnées à 100 m
+dat[, `:=`(
+  x_round = round(x_ETRS89_LAEA, -2),
+  y_round = round(y_ETRS89_LAEA, -2)
+)]
+
+# Créer ID uniquement pour sessions ATLAS
+dat[source == "atlas", id_ses_atlas := ifelse(
+  recordedBy_clean == "unknown",
+  paste(eventDate, x_round, y_round, sep = "_"),
+  paste(eventDate, recordedBy_clean, x_round, y_round, sep = "_")
+)]
+
+# Vérification : résumé des sessions créées
+cat("Nombre total de sessions atlas recréées :", dat[source == "atlas", uniqueN(id_ses_atlas)], "\n")
+cat("Nombre d'observations sans id_ses_atlas :", dat[source == "atlas" & is.na(id_ses_atlas), .N], "\n")
+
+# Histogramme nombre d'observations par session
+session_obs_counts <- dat[source == "atlas", .N, by = id_ses_atlas]
+ggplot(session_obs_counts, aes(x = N)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  scale_x_continuous() +
+  labs(
+    title = "Distribution du nombre d'observations par session (Atlas)",
+    x = "Nombre d'observations",
+    y = "Nombre de sessions"
+  ) + xlim(0,20) +
+  theme_minimal(base_size = 14)
 ```
 
-### Nouvelle-Aquitaine
+# Choix des fenêtres spatio-temporelles d'étude
 
 ```{r}
-# Filtrer une région + 2011-2024
-dat_na <- dat[region=="Nouvelle-Aquitaine"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
+# Tableau de décision basé sur le critère de > 10 sites et > 50 sessions (en format long)
 
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_na <- dat_na[, .N, by = list(source, year(dat_na$eventDate))]
-ggplot(datN_na) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Nouvelle-Aquitaine", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
-```
-
-### Auvergne-Rhône-Alpes
-
-```{r}
-# Filtrer une région + 2011-2024
-dat_aur <- dat[region=="Auvergne-Rhône-Alpes"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
-
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_aur <- dat_aur[, .N, by = list(source, year(dat_aur$eventDate))]
-ggplot(datN_aur) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Auvergne-Rhône-Alpes", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
-```
-
-### Occitanie
-
-```{r}
-# Filtrer une région + 2011-2024
-dat_occ <- dat[region=="Occitanie"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
-
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_occ <- dat_occ[, .N, by = list(source, year(dat_occ$eventDate))]
-ggplot(datN_occ) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Occitanie", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
-```
-
-### Normandie
-
-```{r}
-# Filtrer une région + 2011-2024
-dat_nmd <- dat[region=="Normandie"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
-
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_nmd <- dat_nmd[, .N, by = list(source, year(dat_nmd$eventDate))]
-ggplot(datN_nmd) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Normandie", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
-```
-
-### Grand Est
-
-```{r}
-# Filtrer une région + 2011-2024
-dat_ge <- dat[region=="Grand Est"][eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2024-12-31")]
-
-# Représenter graphiquement l'évolution de l'effort d'échantillonnage au cours du temps
-datN_ge <- dat_ge[, .N, by = list(source, year(dat_ge$eventDate))]
-ggplot(datN_ge) +
-  geom_line(aes(x = year, y = N)) +
-  # geom_point(aes(x = year, y = N)) +
-  theme_minimal() +
-  labs(title = "Grand Est", y = "Occurrences") +
-  scale_y_continuous(labels = function(x) format(x, big.mark = ",")) +
-  # scale_x_continuous(breaks = c(seq(1700, 1900, by = 100),
-  #                               seq(1990, 2024, by = 10))) +
-  # # scale_x_continuous(breaks = seq(2010, 2025, by = 5)) +
-  facet_wrap(facets = vars(source), scales = "free") +
-  theme(axis.title.x = element_blank())
-```
-
-### Tableau de décision basé sur critère de \>200 obs
-
-```{r}
-# Comptage observations par région et année
-tab <- dat_steli[, .N, by = .(region, year = year(eventDate))]
-
-# Table large : années en colonnes
-tab_wide <- dcast(tab, region ~ year, value.var = "N", fill = 0)
-
-# tableau gt avec surbrillance cellules >= 200
-gt_table <- gt(tab_wide) %>%
-  tab_header(title = "Nombre d'observations STELI par région et par an")
-for (col in as.character(2011:2024)) {
-  gt_table <- gt_table %>%
-    tab_style(
-      style = cell_fill(color = "lightgreen"),
-      locations = cells_body(columns = col, rows = tab_wide[[col]] >= 200
-      )
-    )
-}
-gt_table
-```
-
-### Tableau de décision basé sur critère de >10 sites
-
-```{r}
-# Comptage sites par région et année
+# Comptage par région et année
 tab_sites <- dat_steli[, .(n_sites = uniqueN(id_site)), by = .(region, year = year(eventDate))]
+tab_sessions <- dat_steli[, .(n_sessions = uniqueN(id_ses)), by = .(region, year = year(eventDate))]
 
-# Table large : années en colonnes
-tab_sites_wide <- dcast(tab_sites, region ~ year, value.var = "n_sites", fill = 0)
+# Fusionner les deux
+tab_combined <- merge(tab_sites, tab_sessions, by = c("region", "year"), all = TRUE)
 
-# tableau gt avec surbrillance cellules >= 10
-gt_table <- gt(tab_sites_wide) %>%
-  tab_header(title = "Nombre de sites STELI par région et par an")
-for (col in as.character(2011:2024)) {
-  gt_table <- gt_table %>%
-    tab_style(
-      style = cell_fill(color = "lightgreen"),
-      locations = cells_body(
-        columns = col,
-        rows = tab_sites_wide[[col]] >= 10
-      )
-    )
-}
+# Créer indicateur pour surbrillance
+tab_combined[, highlight := (n_sites >= 10 & n_sessions >= 50)]
+
+# Tableau GT
+gt_table <- gt(tab_combined) %>%
+  tab_header(title = "Nombre de sites et de sessions STELI par région et par an") %>%
+  data_color(
+    columns = c(n_sites, n_sessions),
+    rows = highlight == TRUE,
+    colors = function(x) "lightgreen"  # ✅ Couleur verte forcée
+  ) %>%
+  cols_label(
+    region = "Région",
+    year = "Année",
+    n_sites = "Sites",
+    n_sessions = "Sessions"
+  ) %>%
+  cols_hide(columns = highlight)  # ✅ Masquer la colonne highlight
 gt_table
 ```
 
-### Tableau de décision basé sur critère de >50 sessions
 
-```{r}
-# Comptage sessions par région et année
-tab_sites <- dat_steli[, .(n_sites = uniqueN(id_ses)), by = .(region, year = year(eventDate))]
+# Comparer la distribution des espèces entre les données STELI et ATLAS (Groupes Sud/Nord)
 
-# Table large : années en colonnes
-tab_sites_wide <- dcast(tab_sites, region ~ year, value.var = "n_sites", fill = 0)
-
-# tableau gt avec surbrillance cellules >= 200
-gt_table <- gt(tab_sites_wide) %>%
-  tab_header(title = "Nombre de sessions par région et par an")
-for (col in as.character(2011:2024)) {
-  gt_table <- gt_table %>%
-    tab_style(
-      style = cell_fill(color = "lightgreen"),
-      locations = cells_body(
-        columns = col,
-        rows = tab_sites_wide[[col]] >= 50
-      )
-    )
-}
-gt_table
-```
-
-## Comparer la distribution des espèces entre les données STELI et ATLAS
-
-### Groupe Sud 1 : Nouvelle-Aquitaine + Occitanie (2016-2018)
+## Groupe Sud 1 : Nouvelle-Aquitaine + Occitanie (2016-2017)
 
 ```{r}
 # Filtrage
-dat_s1 <- dat[region %in% c("Nouvelle-Aquitaine", "Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2018-12-31")]
+dat_s1 <- dat[region %in% c("Nouvelle-Aquitaine", "Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2017-12-31")]
 
 # Table croisée espèces × source
 table_species_s1 <- dat_s1[, .N, by = .(scientificName, source)] |>
@@ -307,7 +186,7 @@ ggplot(top_bias_s1, aes(x = reorder(scientificName, abs(residus_atlas)), y = res
   labs(
     x = NULL, y = "Résidu standardisé (ATLAS)",
     fill = "Biais de représentation",
-    title = "Top 20 des espèces les plus biaisées dans ATLAS"
+    title = "Espèces les plus biaisées dans ATLAS (Nouvelle-Aquitaine + Occitanie)"
   ) +
   theme_minimal(base_size = 13) +
   theme(
@@ -337,74 +216,67 @@ ggplot(table_prop_long_s1, aes(x = reorder(scientificName, proportion), y = prop
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
   labs(x = NULL, y = "Proportion des observations", fill = "Source",
-       title = "Distribution relative des observations par espèce") +
+       title = "Distribution relative des observations par espèce (Nouvelle-Aquitaine + Occitanie, 2016-2017") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"),
         legend.position = "top")
 ```
 
-### Groupe Nord 1 : Hauts-de-France + Grand Est (2015-2017)
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
 
 ```{r}
 # Filtrage
-dat_n1 <- dat[region %in% c("Hauts-de-France", "Grand Est") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2017-12-31")]
+dat_steli_s1 <- dat[source == "STELI" & region %in% c("Nouvelle-Aquitaine", "Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2017-12-31")]
 
-# Table croisée espèces × source
-table_species_n1 <- dat_n1[, .N, by = .(scientificName, source)] |>
-  dcast(scientificName ~ source, value.var = "N", fill = 0)
+# Nombre de sessions par mois et par année
+dat_steli_s1[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_s1[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
 
-# Supprimer les espèces absentes des deux jeux de données
-table_species_n1 <- table_species_n1[atlas + STELI > 0]
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année (Nouvelle Aquitaine + Occitanie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
 
-# Créer la table de contingence
-mat_n1 <- as.matrix(table_species_n1[, .(atlas, STELI)])
-rownames(mat_n1) <- table_species_n1$species_name
-
-# Test du chi² d’indépendance
-test_chi2_n1 <- chisq.test(mat_n1)
-test_chi2_n1
+#Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_steli_s1[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (Nouvelle Aquitaine + Occitanie, 2016-2017)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
 ```
+
+### Evolution de l'effort d'échantillonnage ATLAS au cours des mois
 
 ```{r}
-# Résidus standardisés
-residus_n1 <- test_chi2_n1$stdres
-table_species_n1[, `:=`(residus_atlas = residus_n1[, "atlas"])]
-table_species_n1[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
+# Filtrage
+dat_atlas_s1 <- dat[source == "atlas" & region %in% c("Nouvelle-Aquitaine", "Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2017-12-31")]
 
-# Top 30 des espèces les plus biaisées
-top_bias_n1 <- table_species_n1[order(-abs(residus_atlas))][1:30]
+# Nombre de sessions par mois et par année
+dat_atlas_s1[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_s1[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
 
-# Graphique sur-/sous-représentation des espèces dans l'atlas vs steli
-ggplot(top_bias_n1, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
-  geom_col() +
-  coord_flip() +
-  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
-  theme_minimal(base_size = 13) +
-  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Nouvelle Aquitaine + Occitanie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
 
-# Calcul des proportions globales des espèces
-table_species_n1[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
-
-# Format long
-table_prop_long_n1 <- melt(
-  table_species_n1[scientificName %in% top_bias_n1$scientificName, .(scientificName, prop_atlas, prop_steli)],
-  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
-)
-table_prop_long_n1[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
-
-# Graphique proportions
-ggplot(table_prop_long_n1, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
-  geom_col(position = "dodge") +
-  coord_flip() +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
-  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
-  theme_minimal(base_size = 13) +
-  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
+#Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_s1[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (Nouvelle Aquitaine + Occitanie, 2016-2017)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
 ```
 
-### Groupe Nord 2 : Hauts-de-France + Normandie (2012-2013)
+## Groupe Nord 2 : Hauts-de-France + Normandie (2012-2013)
 
 ```{r}
 # Filtrage
@@ -440,7 +312,7 @@ ggplot(top_bias_n2, aes(x = reorder(scientificName, abs(residus_atlas)), y = res
   geom_col() +
   coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Espèces les plus biaisées dans ATLAS (Hauts-de-France + Normandie, 2012-2013)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
 
@@ -460,23 +332,74 @@ ggplot(table_prop_long_n2, aes(x = reorder(scientificName, proportion), y = prop
   coord_flip() +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce (Hauts-de-France + Normandie, 2012-2013)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-
-
-
-
-
-
-
-### Hauts-de-France (2011-2017)
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
 
 ```{r}
 # Filtrage
-dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2017-12-31")]
+dat_steli_n2 <- dat[source == "STELI" & region %in% c("Hauts-de-France", "Normandie") & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_n2[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_n2[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année (Hauts-de-France + Normandie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+#Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_steli_n2[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (Hauts-de-France + Normandie, 2012-2013)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Evolution de l'effort d'échantillonnage ATLAS au cours des mois
+
+```{r}
+# Filtrage
+dat_atlas_n2 <- dat[source == "atlas" & region %in% c("Hauts-de-France", "Normandie") & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_atlas_n2[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_n2[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Hauts-de-France + Normandie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_n2[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (Hauts-de-France + Normandie, 2012–2013)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+
+
+# Comparer la distribution des espèces entre les données STELI et ATLAS (Régions seules)
+
+## Hauts-de-France (2011-2016)
+
+```{r}
+# Filtrage
+dat_hdf <- dat[region %in% c("Hauts-de-France") & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2016-12-31")]
 
 # Table croisée espèces × source
 table_species_hdf <- dat_hdf[, .N, by = .(scientificName, source)] |>
@@ -508,7 +431,7 @@ ggplot(top_bias_hdf, aes(x = reorder(scientificName, abs(residus_atlas)), y = re
   geom_col() + coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
   labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation",
-       title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+       title = "Espèces les plus biaisées dans ATLAS (Hauts-de-France, 2011-2016)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
 
@@ -528,12 +451,66 @@ ggplot(table_prop_long_hdf, aes(x = reorder(scientificName, proportion), y = pro
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
   labs(x = NULL, y = "Proportion des observations", fill = "Source",
-       title = "Distribution relative des observations par espèce") +
+       title = "Distribution relative des observations par espèce (Hauts-de-France, 2011-2016)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-### Normandie (2012–2013)
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
+
+```{r}
+# Filtrage
+dat_steli_hdf <- dat[source == "STELI" & region == "Hauts-de-France" & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2016-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_hdf[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_hdf[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année (Hauts-de-France)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+#Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_steli_hdf[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (Hauts-de-France, 2011-2016)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Evolution de l'effort d'échantillonnage Atlas au cours des mois
+
+```{r}
+# Filtrage
+dat_atlas_hdf <- dat[source == "atlas" & region == "Hauts-de-France" & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2016-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_atlas_hdf[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_hdf[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Hauts-de-France)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_hdf[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (Hauts-de-France, 2011-2016)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+## Normandie (2012–2013)
 
 ```{r}
 # Filtrage
@@ -568,7 +545,7 @@ top_bias_nor <- table_species_nor[order(-abs(residus_atlas))][1:30]
 ggplot(top_bias_nor, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
   geom_col() + coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Espèces les plus biaisées dans ATLAS (Normandie, 2012-2013)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
 
@@ -585,19 +562,100 @@ ggplot(table_prop_long_nor, aes(x = reorder(scientificName, proportion), y = pro
   geom_col(position = "dodge") + coord_flip() +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce (Normandie, 2012-2013)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-### Grand Est (2015–2017)
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
 
 ```{r}
 # Filtrage
-dat_ge <- dat[region %in% c("Grand Est") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2017-12-31")]
+dat_steli_nor <- dat[source == "STELI" & region == "Normandie" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_nor[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_nor[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année (Normandie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_nor[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (Normandie, 2012-2013)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Evolution de l'effort d'échantillonnage ATLAS au cours des mois
+
+```{r}
+# Filtrage
+dat_atlas_norm <- dat[source == "atlas" & region == "Normandie" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Nombre d'observations par mois et par année
+dat_atlas_norm[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+obs_per_month <- dat_atlas_norm[, .N, by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(obs_per_month, aes(x = month, y = factor(year), fill = N)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre d'observations ATLAS par mois et par année (Normandie)",
+       x = "Mois", y = "Année", fill = "Observations") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+obs_monthly <- dat_atlas_norm[, .N, by = month]
+ggplot(obs_monthly, aes(x = month, y = N)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Observations ATLAS par mois (Normandie, 2012-2013)",
+       x = "Mois", y = "Nombre total d'observations") +
+  theme_minimal(base_size = 14)
+```
+
+```{r}
+# Filtrage
+dat_atlas_nor <- dat[source == "atlas" & region == "Normandie" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_atlas_nor[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_nor[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Normandie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_nor[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (Normandie, 2012–2013)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+
+## Grand Est (2015-2016)
+
+```{r}
+# Filtrage
+dat_ge <- dat[region %in% c("Grand Est") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2016-12-31")]
 
 # Table croisée espèces × source
-table_species_ge <- dat_ge[, .N, by = .(scientificName, source)] |> dcast(scientificName ~ source, value.var = "N", fill = 0)
+table_species_ge <- dat_ge[, .N, by = .(scientificName, source)] |>
+  dcast(scientificName ~ source, value.var = "N", fill = 0)
 
 # Supprimer les espèces absentes des deux jeux de données
 table_species_ge <- table_species_ge[atlas + STELI > 0]
@@ -624,7 +682,7 @@ top_bias_ge <- table_species_ge[order(-abs(residus_atlas))][1:30]
 ggplot(top_bias_ge, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
   geom_col() + coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Espèces les plus biaisées dans ATLAS (Grand Est, 2015-2016)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
 
@@ -633,7 +691,7 @@ table_species_ge[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / su
 
 # Format long
 table_prop_long_ge <- melt(table_species_ge[scientificName %in% top_bias_ge$scientificName, .(scientificName, prop_atlas, prop_steli)],
-                           id.vars = "scientificName", variable.name = "source", value.name = "proportion")
+                            id.vars = "scientificName", variable.name = "source", value.name = "proportion")
 table_prop_long_ge[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
 
 # Graphique proportions
@@ -641,78 +699,70 @@ ggplot(table_prop_long_ge, aes(x = reorder(scientificName, proportion), y = prop
   geom_col(position = "dodge") + coord_flip() +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce (Grand Est, 2015-2016)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-### Auvergne-Rhône-Alpes (2013–2019) --> modifier les dates en fonction du critère de sélection...
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
+
+```{r}
+# Filtrage
+dat_steli_ge <- dat[source == "STELI" & region %in% c("Grand Est") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2016-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_ge[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_ge[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année (Grand Est)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_ge[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (Grand Est, 2015-2016)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Evolution de l'effort d'échantillonnage ATLAS au cours des mois
+
+```{r}
+# Filtrage
+dat_atlas_ge <- dat[source == "atlas" & region == "Grand Est" & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2016-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_atlas_ge[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_ge[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Grand Est)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_ge[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (Grand Est, 2015–2016)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+## Nouvelle-Aquitaine (2015–2020)
 
 ```{r}
 # Filtrage des données
-dat_ara <- dat[region %in% c("Auvergne-Rhône-Alpes") & eventDate >= as.IDate("2013-01-01") & eventDate <= as.IDate("2019-12-31")]
-
-# Table croisée espèces × source
-table_species_ara <- dat_ara[, .N, by = .(scientificName, source)] |>
-  dcast(scientificName ~ source, value.var = "N", fill = 0)
-
-# Suppression des espèces absentes des deux jeux
-table_species_ara <- table_species_ara[atlas + STELI > 0]
-
-# Table de contingence
-mat_ara <- as.matrix(table_species_ara[, .(atlas, STELI)])
-rownames(mat_ara) <- table_species_ara$species_name
-
-# Test du chi²
-test_chi2_ara <- chisq.test(mat_ara)
-test_chi2_ara
-```
-
-```{r}
-# Résidus standardisés
-residus_ara <- test_chi2_ara$stdres
-table_species_ara[, `:=`(residus_atlas = residus_ara[, "atlas"])]
-table_species_ara[, deviation := ifelse(residus_atlas > 0, "Sur-représentée", "Sous-représentée")]
-
-# Top 30 des espèces les plus biaisées
-top_bias_ara <- table_species_ara[order(-abs(residus_atlas))][1:30]
-
-# Graphique sur-/sous-représentation
-ggplot(top_bias_ara, aes(x = reorder(scientificName, abs(residus_atlas)), y = residus_atlas, fill = deviation)) +
-  geom_col() +
-  coord_flip() +
-  scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
-  theme_minimal(base_size = 13) +
-  theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
-
-# Calcul des proportions globales
-table_species_ara[, `:=`(prop_atlas = atlas / sum(atlas), prop_steli = STELI / sum(STELI))]
-
-# Format long pour graphique
-table_prop_long_ara <- melt(
-  table_species_ara[scientificName %in% top_bias_ara$scientificName, .(scientificName, prop_atlas, prop_steli)],
-  id.vars = "scientificName", variable.name = "source", value.name = "proportion"
-)
-table_prop_long_ara[, source := fifelse(source == "prop_atlas", "ATLAS", "STELI")]
-
-# Graphique des proportions
-ggplot(table_prop_long_ara, aes(x = reorder(scientificName, proportion), y = proportion, fill = source)) +
-  geom_col(position = "dodge") +
-  coord_flip() +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
-  scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
-  theme_minimal(base_size = 13) +
-  theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
-
-```
-
-### Région : Nouvelle-Aquitaine (2012–2019) --> modifier les dates en fonction du critère de sélection...
-
-```{r}
-# Filtrage des données
-dat_naq <- dat[region %in% c("Nouvelle-Aquitaine") & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2019-12-31")]
+dat_naq <- dat[region %in% c("Nouvelle-Aquitaine") & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2020-12-31")]
 
 # Table croisée espèces × source
 table_species_naq <- dat_naq[, .N, by = .(scientificName, source)] |>
@@ -744,7 +794,7 @@ ggplot(top_bias_naq, aes(x = reorder(scientificName, abs(residus_atlas)), y = re
   geom_col() +
   coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Espèces les plus biaisées dans ATLAS (Nouvelle-Aquitaine, 2015-2020)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
 
@@ -764,16 +814,70 @@ ggplot(table_prop_long_naq, aes(x = reorder(scientificName, proportion), y = pro
   coord_flip() +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce (Nouvelle-Aquitaine, 2015-2020)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-### Occitanie (2016–2018)
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
+
+```{r}
+# Filtrage
+dat_steli_naq <- dat[source == "STELI" & region == "Nouvelle-Aquitaine" & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2020-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_steli_naq[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_steli_naq[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
+
+# Heatmap
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions STELI par mois et par année (Nouvelle-Aquitaine)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles
+sessions_monthly <- dat_steli_naq[, .(n_sessions = uniqueN(id_ses)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions STELI par mois (Nouvelle-Aquitaine, 2015-2020)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+### Evolution de l'effort d'échantillonnage ATLAS au cours des mois
+
+```{r}
+# Filtrage
+dat_atlas_naq <- dat[source == "atlas" & region == "Nouvelle-Aquitaine" & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2020-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_atlas_naq[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_naq[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Nouvelle-Aquitaine)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_naq[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (Nouvelle-Aquitaine, 2015–2020)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
+
+## Occitanie (2016–2017)
 
 ```{r}
 # Filtrage des données
-dat_occ <- dat[region %in% c("Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2018-12-31")]
+dat_occ <- dat[region %in% c("Occitanie") & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2017-12-31")]
 
 # Table croisée espèces × source
 table_species_occ <- dat_occ[, .N, by = .(scientificName, source)] |>
@@ -805,7 +909,7 @@ ggplot(top_bias_occ, aes(x = reorder(scientificName, abs(residus_atlas)), y = re
   geom_col() +
   coord_flip() +
   scale_fill_manual(values = c("Sur-représentée" = "tomato", "Sous-représentée" = "steelblue")) +
-  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Top 20 des espèces les plus biaisées dans ATLAS") +
+  labs(x = NULL, y = "Résidu standardisé (ATLAS)", fill = "Biais de représentation", title = "Espèces les plus biaisées dans ATLAS (Occitanie, 2016-2017)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 8, face = "italic"), legend.position = "top")
 
@@ -825,153 +929,16 @@ ggplot(table_prop_long_occ, aes(x = reorder(scientificName, proportion), y = pro
   coord_flip() +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.01)) +
   scale_fill_manual(values = c("ATLAS" = "darkorange", "STELI" = "steelblue")) +
-  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce") +
+  labs(x = NULL, y = "Proportion des observations", fill = "Source", title = "Distribution relative des observations par espèce (Occitanie, 2016-2017)") +
   theme_minimal(base_size = 13) +
   theme(axis.text.y = element_text(size = 7, face = "italic"), legend.position = "top")
 ```
 
-## Phénologie : s'assurer que l'effort de collecte STELI est homogène mois par mois sur plusieurs années
-
-### Hauts-de-France (2011-2017)
+### Evolution de l'effort d'échantillonnage STELI au cours des mois
 
 ```{r}
 # Filtrage
-dat_steli_hdf <- dat[source == "STELI" & region == "Hauts-de-France" & eventDate >= as.IDate("2011-01-01") & eventDate <= as.IDate("2017-12-31")]
-
-# Nombre de sessions par mois et par année
-dat_steli_hdf[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
-sessions_per_month <- dat_steli_hdf[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
-
-# Visualisation : heatmap année × mois
-ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
-  geom_tile(color = "white") +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Nombre de sessions STELI par mois et par année",
-       x = "Mois", y = "Année", fill = "Sessions") +
-  theme_minimal(base_size = 14)
-
-#Séries mensuelles (somme sur toutes les années)
-sessions_monthly <- dat_steli_hdf[, .(n_sessions = uniqueN(id_ses)), by = month]
-ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
-  geom_col(fill = "steelblue") +
-  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
-       x = "Mois", y = "Nombre total de sessions") +
-  theme_minimal(base_size = 14)
-```
-
-### Normandie (2012–2013)
-
-```{r}
-# Filtrage
-dat_steli_norm <- dat[source == "STELI" & region == "Normandie" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2013-12-31")]
-
-# Nombre de sessions par mois et par année
-dat_steli_norm[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
-sessions_per_month <- dat_steli_norm[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
-
-# Visualisation : heatmap année × mois
-ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
-  geom_tile(color = "white") +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Nombre de sessions STELI par mois et par année",
-       x = "Mois", y = "Année", fill = "Sessions") +
-  theme_minimal(base_size = 14)
-
-# Séries mensuelles
-sessions_monthly <- dat_steli_norm[, .(n_sessions = uniqueN(id_ses)), by = month]
-ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
-  geom_col(fill = "steelblue") +
-  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
-       x = "Mois", y = "Nombre total de sessions") +
-  theme_minimal(base_size = 14)
-```
-
-### Grand Est (2015–2017)
-
-```{r}
-# Filtrage
-dat_steli_ge <- dat[source == "STELI" & region == "Grand Est" & eventDate >= as.IDate("2015-01-01") & eventDate <= as.IDate("2017-12-31")]
-
-# Nombre de sessions par mois et par année
-dat_steli_ge[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
-sessions_per_month <- dat_steli_ge[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
-
-# Heatmap
-ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
-  geom_tile(color = "white") +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Nombre de sessions STELI par mois et par année",
-       x = "Mois", y = "Année", fill = "Sessions") +
-  theme_minimal(base_size = 14)
-
-# Séries mensuelles
-sessions_monthly <- dat_steli_ge[, .(n_sessions = uniqueN(id_ses)), by = month]
-ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
-  geom_col(fill = "steelblue") +
-  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
-       x = "Mois", y = "Nombre total de sessions") +
-  theme_minimal(base_size = 14)
-```
-
-### Auvergne-Rhône-Alpes (2013–2019)
-
-```{r}
-# Filtrage
-dat_steli_ara <- dat[source == "STELI" & region == "Auvergne-Rhône-Alpes" & eventDate >= as.IDate("2013-01-01") & eventDate <= as.IDate("2019-12-31")]
-
-# Nombre de sessions par mois et par année
-dat_steli_ara[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
-sessions_per_month <- dat_steli_ara[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
-
-# Heatmap
-ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
-  geom_tile(color = "white") +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Nombre de sessions STELI par mois et par année",
-       x = "Mois", y = "Année", fill = "Sessions") +
-  theme_minimal(base_size = 14)
-
-# Séries mensuelles
-sessions_monthly <- dat_steli_ara[, .(n_sessions = uniqueN(id_ses)), by = month]
-ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
-  geom_col(fill = "steelblue") +
-  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
-       x = "Mois", y = "Nombre total de sessions") +
-  theme_minimal(base_size = 14)
-```
-
-### Nouvelle-Aquitaine (2012–2019)
-
-```{r}
-# Filtrage
-dat_steli_na <- dat[source == "STELI" & region == "Nouvelle-Aquitaine" & eventDate >= as.IDate("2012-01-01") & eventDate <= as.IDate("2019-12-31")]
-
-# Nombre de sessions par mois et par année
-dat_steli_na[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
-sessions_per_month <- dat_steli_na[, .(n_sessions = uniqueN(id_ses)), by = .(year, month)]
-
-# Heatmap
-ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
-  geom_tile(color = "white") +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Nombre de sessions STELI par mois et par année",
-       x = "Mois", y = "Année", fill = "Sessions") +
-  theme_minimal(base_size = 14)
-
-# Séries mensuelles
-sessions_monthly <- dat_steli_na[, .(n_sessions = uniqueN(id_ses)), by = month]
-ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
-  geom_col(fill = "steelblue") +
-  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
-       x = "Mois", y = "Nombre total de sessions") +
-  theme_minimal(base_size = 14)
-```
-
-### Occitanie (2016–2018)
-
-```{r}
-# Filtrage
-dat_steli_occ <- dat[source == "STELI" & region == "Occitanie" & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2018-12-31")]
+dat_steli_occ <- dat[source == "STELI" & region == "Occitanie" & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2017-12-31")]
 
 # Nombre de sessions par mois et par année
 dat_steli_occ[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
@@ -981,7 +948,7 @@ sessions_per_month <- dat_steli_occ[, .(n_sessions = uniqueN(id_ses)), by = .(ye
 ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
   geom_tile(color = "white") +
   scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Nombre de sessions STELI par mois et par année",
+  labs(title = "Nombre de sessions STELI par mois et par année (Occitanie)",
        x = "Mois", y = "Année", fill = "Sessions") +
   theme_minimal(base_size = 14)
 
@@ -989,9 +956,34 @@ ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) 
 sessions_monthly <- dat_steli_occ[, .(n_sessions = uniqueN(id_ses)), by = month]
 ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
   geom_col(fill = "steelblue") +
-  labs(title = "Sessions STELI par mois (total sur 2011–2019)",
+  labs(title = "Sessions STELI par mois (Occitanie, 2016-2017)",
        x = "Mois", y = "Nombre total de sessions") +
   theme_minimal(base_size = 14)
 ```
 
+### Evolution de l'effort d'échantillonnage ATLAS au cours des mois
 
+```{r}
+# Filtrage
+dat_atlas_occ <- dat[source == "atlas" & region == "Occitanie" & eventDate >= as.IDate("2016-01-01") & eventDate <= as.IDate("2017-12-31")]
+
+# Nombre de sessions par mois et par année
+dat_atlas_occ[, `:=`(year = year(eventDate), month = month(eventDate, label = TRUE, abbr = TRUE))]
+sessions_per_month <- dat_atlas_occ[, .(n_sessions = uniqueN(id_ses_atlas)), by = .(year, month)]
+
+# Visualisation : heatmap année × mois
+ggplot(sessions_per_month, aes(x = month, y = factor(year), fill = n_sessions)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Nombre de sessions ATLAS par mois et par année (Occitanie)",
+       x = "Mois", y = "Année", fill = "Sessions") +
+  theme_minimal(base_size = 14)
+
+# Séries mensuelles (somme sur toutes les années)
+sessions_monthly <- dat_atlas_occ[, .(n_sessions = uniqueN(id_ses_atlas)), by = month]
+ggplot(sessions_monthly, aes(x = month, y = n_sessions)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Sessions ATLAS par mois (2016–2017, Occitanie)",
+       x = "Mois", y = "Nombre total de sessions") +
+  theme_minimal(base_size = 14)
+```
