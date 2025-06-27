@@ -519,7 +519,7 @@ khi2_gens <- chisq.test(x = gens_comp$N_obs,
 khi2_gens
 ```
 
-Le test du khi² de conformité indique une différence significative entre la distribution observée des zones bioclimatiques et leur distribution attendue (X² = 41472, df = 2, p \< 2.2e-16).
+Le test du khi² de conformité indique une différence significative entre la distribution observée des zones bioclimatiques et leur distribution attendue (X² = 41472, df = 3, p \< 2.2e-16).
 
 ### Contributions des classes au Khi²
 

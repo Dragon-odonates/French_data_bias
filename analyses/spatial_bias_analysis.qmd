@@ -17,6 +17,7 @@ library(data.table)
 library(DT)
 library(dplyr)
 library(ggplot2)
+library(scales)
 
 library(rnaturalearth)
 library(terra)
@@ -31,7 +32,7 @@ read_folder1 <- here("data/04_gis_info/data")
 read_folder2 <- here("data/05_aggregate_by_grid")
 grid_folder <- here("data/03_grid")
 gisdata_folder <- here("data/gis")
-fig_folder <- here("figures/rapport_stage_M1_TMP")
+fig_folder <- here("figures/corrected_rapport_stage_M1_TMP")
 ```
 
 # Analyse exploratoire
@@ -49,7 +50,8 @@ dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-
 ```{r}
 ## Création d'un ID session ATLAS
 
-# Vérifier les valeurs manquantes ou peu informative dans les métadonnées 
+# Vérifier les valeurs manquantes ou peu informative dans les métadonnées ATLAS
+dat_atlas <- dat[source=="atlas"]
 dat_atlas[, .(
   n_total = .N,
   n_NA_eventDate = sum(is.na(eventDate)),
@@ -89,14 +91,11 @@ ggplot(session_obs_counts, aes(x = N)) +
     y = "Nombre de sessions"
   ) + xlim(0,20) +
   theme_minimal(base_size = 14)
-```
 
-```{r}
-# Créer une colonne d'ID session générique 
+# Créer une colonne d'ID session (ATLAS et STELI) 
 dat[, id_session := fifelse(source == "atlas", id_ses_atlas, id_ses)]
 dat <- dat[!is.na(id_session)]
 ```
-
 
 ## Evaluation du biais spatial en lien avec l'occupation des sols
 
@@ -141,6 +140,11 @@ write.csv(france_clc,
 ```
 
 ```{r}
+# Importer et filtrer les clc attendues
+clc_expected <- read.csv(file.path(grid_folder, "france_clc2018_100m.csv"))
+clc_expected <- as.data.table(clc_expected)
+clc_expected <- clc_expected[order(-N_exp)][!is.na(CLC2018_landcover) & CLC2018_landcover != "NODATA"]
+
 # Création d'une nouvelle colonne de regroupement dans clc_expected
 clc_expected[, landcover_groups := fcase(
   CLC2018_landcover %in% c("Continuous urban fabric", "Discontinuous urban fabric", "Industrial or commercial units", "Road and rail networks and associated land", "Port areas", "Airports", "Mineral extraction sites", "Dump sites", "Construction sites", "Green urban areas", "Sport and leisure facilities"),
@@ -218,11 +222,11 @@ dat[, landcover_groups := fcase(
 )]
 
 # Agréger les sessions par landcover_groups
-landcover_groups_observed <- dat[, .(n_sessions = uniqueN(id_session)), by = landcover_groups]
+landcover_groups_observed <- dat[, .(N_obs = uniqueN(id_session)), by = landcover_groups]
 
 # Calculer les perc_obs par groupe
-landcover_groups_observed[, perc_obs := 100 * n_sessions / sum(n_sessions)]
-landcover_groups_observed <- landcover_groups_observed[order(-n_sessions)]
+landcover_groups_observed[, perc_obs := 100 * N_obs / sum(N_obs)]
+landcover_groups_observed <- landcover_groups_observed[order(-N_obs)]
 landcover_groups_observed |> datatable()
 
 # Barplot
@@ -238,3 +242,758 @@ ggplot(landcover_groups_observed) +
                                    size = 6))
 ```
 
+### Comparaison des distributions attendue et observée
+
+```{r}
+# Joindre les 2 distributions par les ID CLC
+landcover_groups_comp <- landcover_groups_observed[landcover_groups_expected, on = .(landcover_groups)]
+landcover_groups_comp |> datatable()
+# Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
+lancover_groups_long <- melt(landcover_groups_comp,
+                 id.vars = "landcover_groups",
+                 measure.vars = c("perc_obs", "perc_exp"),
+                 variable.name = "type",
+                 value.name = "perc")
+# Barplot
+ggplot(lancover_groups_long[!is.na(perc)], aes(x = reorder(landcover_groups, perc),
+                                               y = perc, 
+                                               fill = type)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_manual(
+    values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue"),
+    labels = c("perc_obs" = "Observée", "perc_exp" = "Attendue")
+  ) +
+  labs(x = NULL, y = "Proportion (%)", fill = "Distribution") +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"),
+        legend.position = "top")
+
+# Sauvegarder la figure (sans titre)
+ggsave(file.path(fig_folder, "corrected_distribCLC.png"), width = 8, height = 6, dpi = 300)
+```
+
+```{r}
+# Test du Khi² de conformité 
+khi2_groups <- chisq.test(x = landcover_groups_comp$N_obs, 
+                        p = landcover_groups_comp$N_exp / sum(landcover_groups_comp$N_exp))
+khi2_groups
+```
+
+Le test du khi² de conformité indique une différence hautement significative entre la distribution observée des classes d’occupation du sol et leur distribution attendue (X² = 269220, df = 6, p \< 2.2e-16).
+
+### Contributions des classes au Khi²
+
+```{r}
+#Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
+scaling_factor <- sum(landcover_groups_comp$N_obs) / sum(landcover_groups_comp$N_exp)
+landcover_groups_comp[, N_exp_scaled := N_exp * scaling_factor]
+# Calcul de la contribution des classes au khi² (en %)
+landcover_groups_comp[, contrib_khi2 := (N_obs - N_exp_scaled)^2 / N_exp_scaled]
+landcover_groups_comp[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)][order(-contrib_khi2)]
+# Visualiser les contributions
+ggplot(landcover_groups_comp, aes(x = contrib_khi2_perc, 
+                      y = reorder(landcover_groups, contrib_khi2_perc))) +
+  geom_col(fill = "tomato") +
+  labs(x = "Contribution au khi² (%)",
+       title = "Contribution de chaque classe CLC au test du khi²") +
+  theme_minimal(base_size = 14)
+
+# Quels groupes sont sur- ou sous-représentés dans les données ?
+landcover_groups_comp[, deviation := khi2_groups$stdres]
+ggplot(landcover_groups_comp, aes(x = deviation, 
+                                  y = reorder(landcover_groups, deviation))) +
+  geom_col(aes(fill = deviation > 0)) +
+  scale_fill_manual(
+    values = c("FALSE" = "steelblue", "TRUE" = "tomato"),
+    labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
+    name = "Classe"  
+  ) +
+  labs(x = "Résidu standardisé", y = NULL) +  
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_blank(),             
+    legend.position = "top"
+  )
+
+# Sauvegarder la figure (sans titre)
+ggsave(file.path(fig_folder, "corrected_resiCLC.png"), width = 8, height = 6, dpi = 300)
+```
+
+
+
+
+# Evaluation du biais spatial en lien avec les zones bioclimatiques
+
+Objectif : comparer les distributions attendue et observée des observations en fonction de la zone bioclimatique en France métropolitaine.
+
+Distribution attendue = distribution des zones sur l'ensemble du territoire français métropolitain
+
+Distribution observée = distribution des zones au sein des données d'occurrence d'odonates
+
+
+Données issues de Metzger et al. 2013 https://doi.org/10.1111/geb.12022
+
+-   raster zones bioclimatiques mondiales : https://datashare.ed.ac.uk/handle/10283/3089
+
+-   table de correspondance des zones bioclimatiques et leurs codes : fournie par Martin Jeanmougin (source ?)
+
+-   shapefile frontières France métropole : https://gadm.org/download_country.html
+
+### Distribution attendue
+
+```{r}
+#| eval: false
+# Importer le vecteur France métropole
+fr <- vect(here(gisdata_folder,"gadm41_FRA_shp", "gadm41_FRA_0.shp"))
+# Importer le raster GEnSv3 et la table de correspondance
+gens <- rast(here(gisdata_folder, "GEnSv3","GEnSv3","gens_v3.tif"))
+meta_gens <- read.csv(here(grid_folder, "GEnS_v3_classification.csv"))
+# Reprojetter le raster pour le superposer au vecteur
+gens_3035 <- project(gens, crs(fr))
+# Couper le raster aux frontières de la métropole
+gens_fr <- crop(gens_3035, fr, mask=TRUE)
+# Calcul des surfaces
+area_gens <- expanse(gens_fr, unit="km", byValue=TRUE)
+# Calculer la proportion du territoire métropolitain couverte par chaque zone bioclimatique
+france_gens <- data.frame(
+  "GEnS"=meta_gens$GEnS[match(area_gens$value, meta_gens$GEnS_seq)],
+  "GEnZname"=meta_gens$GEnZname[match(area_gens$value, meta_gens$GEnS_seq)],
+  "count"=as.numeric(area_gens$area),
+  "perc"=round(as.numeric(area_gens$area)/sum(area_gens$area)*100,3)
+)
+# Stocker le résultat dans un CSV
+write.csv(france_gens, 
+  here::here(grid_folder, "france_GEnS_v3.csv"), row.names=FALSE)
+```
+
+```{r}
+# Afficher le résultat
+bioclim_exp <- read.csv(file.path(grid_folder, "france_GEnS_v3.csv"))
+bioclim_exp <- as.data.table(bioclim_exp)
+gens_exp <- bioclim_exp[, .(N_exp = sum(count),
+  perc_exp = round(sum(count) / sum(bioclim_exp$count) * 100, 3)), by = GEnZname][order(-N_exp)]
+setnames(gens_exp, "GEnZname", "GEnS_v3_bioclim") # pour plus tard
+gens_exp |> datatable()
+# Barplot
+ggplot(gens_exp) +
+  geom_col(aes(x = perc_exp, 
+               y = reorder(GEnS_v3_bioclim, perc_exp)), fill = "darkorange") +
+  xlab("Proportion du territoire occupée par chaque classe bioclimatique (%)") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+
+### Distribution observée
+
+```{r}
+# Agréger les effectifs par GEnS_v3_bioclim
+gens_obs <- dat[, .(N_obs = uniqueN(id_session)), by = GEnS_v3_bioclim][!is.na(GEnS_v3_bioclim)]
+# Calculer les perc_obs par GEnS_v3_bioclim
+gens_obs[, perc_obs := 100 * N_obs / sum(N_obs)]
+gens_obs <- gens_obs[order(-N_obs)]
+gens_obs |> datatable()
+# Barplot
+ggplot(gens_obs) +
+  geom_col(aes(x = perc_obs, 
+               y = reorder(GEnS_v3_bioclim, perc_obs)), fill = "darkorange") +
+  xlab("Part des observations dans chaque classe bioclimatique (%)") +
+  scale_x_continuous(labels = label_number(big.mark = " ", decimal.mark = ",")) +
+  theme_minimal(base_size = 16) +
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.y = element_text(face = "italic",
+                                   size = 6))
+```
+
+### Comparaison des distributions attendue et observée
+
+```{r}
+# Joindre les 2 distributions par les labels des zones bioclimatiques
+gens_comp <- gens_obs[gens_exp, on = .(GEnS_v3_bioclim)][!is.na(N_obs) & !is.na(N_exp)]
+gens_comp |> datatable()
+
+## Regrouper les classes rares (<1% dans les 2 distributions)
+# Créer une colonne qui indique si la classe est "rare"
+gens_comp[, rare := (perc_obs < 1) | (perc_exp < 1)]
+# Séparer les classes rares des communes
+rare_classes <- gens_comp[rare == TRUE]
+# Somme des effectifs et pourcentages des classes rares
+autres <- data.table(
+  GEnS_v3_bioclim = "Autres",
+  N_obs = sum(rare_classes$N_obs),
+  N_exp = sum(rare_classes$N_exp),
+  perc_obs = sum(rare_classes$perc_obs),
+  perc_exp = sum(rare_classes$perc_exp)
+)
+# Garder uniquement les classes non rares
+gens_comp <- gens_comp[rare == FALSE]
+# Ajouter la ligne "Autres" puis trier
+gens_comp <- rbind(gens_comp[, -"rare"], autres, fill = TRUE)
+gens_comp <- gens_comp[order(-perc_exp)]
+
+# Traduire les noms des classes qui m'intéressent pour le graphique 
+gens_comp[, GEnS_v3_bioclim := as.character(GEnS_v3_bioclim)]
+gens_comp[, GEnS_v3_bioclim := fifelse(GEnS_v3_bioclim == "J. Cool temperate and moist", "J. Tempéré frais et humide", fifelse(GEnS_v3_bioclim == "K. Warm temperate and mesic", "K. Tempéré chaud et mésique", fifelse(GEnS_v3_bioclim == "G. cold and mesic", "G. Froid et mésique", GEnS_v3_bioclim)))]
+
+# Transformer la table pour pouvoir la représenter graphiquement : format large --> format long
+gens_long <- melt(gens_comp,
+                 id.vars = "GEnS_v3_bioclim",
+                 measure.vars = c("perc_obs", "perc_exp"),
+                 variable.name = "type",
+                 value.name = "perc")
+
+# Barplot
+ggplot(gens_long[!is.na(perc)], aes(x = reorder(GEnS_v3_bioclim, perc),
+                                              y = perc, 
+                                              fill = type)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_manual(
+    values = c("perc_obs" = "darkorange", "perc_exp" = "steelblue"),
+    labels = c("perc_obs" = "Observée", "perc_exp" = "Attendue")
+  ) +
+  labs(x = NULL, y = "Proportion (%)", fill = "Distribution") +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.y = element_text(size = 8, face = "italic"),
+        legend.position = "top")
+
+# Sauvegarder la figure (sans titre)
+ggsave(file.path(fig_folder, "corrected_distribGENS.png"), width = 8, height = 6, dpi = 300)
+```
+
+```{r}
+# Test du Khi² de conformité 
+khi2_gens <- chisq.test(x = gens_comp$N_obs, 
+                        p = gens_comp$N_exp / sum(gens_comp$N_exp))
+khi2_gens
+```
+
+Le test du khi² de conformité indique une différence significative entre la distribution observée des zones bioclimatiques et leur distribution attendue (X² = 8520.7, df = 3, p \< 2.2e-16).
+
+### Contributions des classes au Khi²
+
+```{r}
+#Recalibrer N_exp à la somme des N_obs (sinon on fausse le calcul)
+scaling_factor <- sum(gens_comp$N_obs) / sum(gens_comp$N_exp)
+gens_comp[, N_exp_scaled := N_exp * scaling_factor]
+
+# Calcul de la contribution des classes au khi² (en %)
+gens_comp[, contrib_khi2 := (N_obs - N_exp_scaled)^2 / N_exp_scaled]
+gens_comp[, contrib_khi2_perc := 100 * contrib_khi2 / sum(contrib_khi2)][order(-contrib_khi2)]
+
+# Visualiser les contributions
+ggplot(gens_comp, aes(x = contrib_khi2_perc, 
+                      y = reorder(GEnS_v3_bioclim, contrib_khi2_perc))) +
+  geom_col(fill = "tomato") +
+  labs(x = "Contribution au khi² (%)",
+       title = "Contribution de chaque zones bioclim au test du khi²") +
+  theme_minimal(base_size = 14)
+
+# Pour chaque classe, est-ce qu'elle est sur- ou sous-représentée dans les données ?
+gens_comp[, deviation := khi2_gens$stdres]
+ggplot(gens_comp, aes(x = deviation, 
+                                      y = reorder(GEnS_v3_bioclim, deviation))) +
+  geom_col(aes(fill = deviation > 0)) +
+  scale_fill_manual(
+    values = c("FALSE" = "steelblue", "TRUE" = "tomato"),
+    labels = c("FALSE" = "Sous-représentée", "TRUE" = "Sur-représentée"),
+    name = "Classe"
+  ) +
+  labs(x = "Résidu standardisé", y = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_blank(),
+    legend.position = "top"
+  )
+
+# Sauvegarder la figure (sans titre)
+ggsave(file.path(fig_folder, "corrected_resiGENS.png"), width = 8, height = 6, dpi = 300)
+```
+
+
+
+
+## Evaluation du biais spatial d'échantillonnage lié à la densité de population
+
+Les données de densité de population sont tirées des estimations du Joint Research Centre (JRC) Data Catalogue, pour 2010, avec une résolution spatiale de 1 km. Les valeurs sont en nombre d'habitants par km².
+
+### Distribution attendue
+
+```{r}
+# Chargement et filtrage des données 
+pop_exp <- read.csv(file.path(grid_folder, "pop_density.csv"), check.names = TRUE)
+pop_exp <- pop_exp[!is.na(pop_exp$value) & pop_exp$value >= 0, ]
+
+# Les données sont agrégées, créer un dt vecteur avec les données individuelles
+pop_exp_indiv <- rep(pop_exp$value, times = pop_exp$area)
+pop_exp_dt <- data.table(pop = pop_exp_indiv)
+
+# Statistiques descriptives
+pop_exp_stats <- pop_exp_dt[, .(
+  min    = min(pop),
+  median = median(pop),
+  mean   = mean(pop),
+  max    = max(pop),
+  sd     = sd(pop)
+)]
+pop_exp_stats |> data.table()
+
+# Visualisation
+ggplot(pop_exp_dt, aes(x = pop)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Densité de population attendue",
+       x = "Densité (hab/km²)", y = "Nombre de pixels") + xlim(-1,750) +
+  theme_minimal()
+ggplot(pop_exp_dt, aes(x = pop)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Densité de population attendue",
+       x = "Densité (hab/km²)", y = "Nombre de pixels") +
+  theme_minimal()
+```
+
+### Distribution observée
+
+```{r}
+# Filtrage des données observées
+dat <- dat[!is.na(popdensity_hab_per_km2) & !is.na(elevation_m) & popdensity_hab_per_km2 >= 0 & elevation_m >= 0]
+
+# Moyenne de densité de population par session
+session_pop <- dat[, .(
+  popdensity_hab_per_km2 = mean(popdensity_hab_per_km2, na.rm = TRUE)
+), by = id_session]
+
+# Statistiques descriptives
+session_pop_stats <- session_pop[, .(
+  min    = min(popdensity_hab_per_km2),
+  median = median(popdensity_hab_per_km2),
+  mean   = mean(popdensity_hab_per_km2),
+  max    = max(popdensity_hab_per_km2),
+  sd     = sd(popdensity_hab_per_km2)
+)]
+session_pop_stats |> data.table()
+
+# Visualisation
+ggplot(session_pop, aes(x = popdensity_hab_per_km2)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous() + 
+  labs(title = "Densité de population des sessions d'observation",
+       x = "Densité (hab/km²)", y = "Nombre de sessions") +
+  xlim(-1, 750) +
+  theme_minimal()
+ggplot(session_pop, aes(x = popdensity_hab_per_km2)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous(trans = "log1p") + 
+  labs(title = "Densité de population des sessions d'observation (échelle log)",
+       x = "Densité (hab/km²)", y = "Nombre de sessions") +
+  theme_minimal()
+```
+
+### Comparaison des distributions observée et attendue
+
+```{r}
+# Joindre les distributions attendue et observée par session
+pop_comp <- rbindlist(list(
+  data.table(source = "attendue", pop = pop_exp_indiv),
+  data.table(source = "observée", pop = session_pop$popdensity_hab_per_km2)
+))
+
+# Statistiques par groupe
+pop_comp[, .(
+  moyenne = mean(pop),
+  médiane = median(pop),
+  sd = sd(pop)
+), by = source]
+
+# Visualisation
+ggplot(pop_comp, aes(x = pop, fill = source)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous() +
+  labs(title = "Distribution des densités de population",
+       x = "densité de population hab/km²)", y = "Densité") + xlim(-1,100) +
+  theme_minimal()
+ggplot(pop_comp, aes(x = pop, fill = source)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(
+    trans = "log1p",
+    breaks = c(0, 1, 10, 100, 1000, 10000),
+    labels = scales::comma_format()
+  ) +
+  labs(
+    x = "Densité de population (hab/km², échelle log1p)",
+    y = "Densité estimée",
+    fill = "Distribution"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_blank())
+
+# Sauvegarder la figure (sans titre)
+ggsave(file.path(fig_folder, "corrected_distribpopdensity.png"), width = 8, height = 6, dpi = 300)
+```
+
+```{r}
+# Test de Kolmogorov-Smirnov
+ks.test(session_pop$popdensity_hab_per_km2, pop_exp_indiv)
+# Comparaison visuelle des distributions cumulées
+ggplot(pop_comp, aes(x = pop, color = source)) +
+  stat_ecdf(geom = "step") +
+  labs(title = "Fonctions de répartition cumulées (ECDF)",
+       x = "Densité de population (hab/km²)", y = "F(x)") + xlim(0, 6000) +
+  theme_minimal()
+```
+
+Il y a une différence significative de taille modérée entre les distributions de densité de populations observée et attendue (D = 0.17624, p < 2.2e-16).
+
+# Analyse du biais spatial d'échantillonnage lié à l'altitude
+
+### Distribution attendue
+
+```{r}
+# Chargement des données 
+alt_exp <- read.csv(file.path(grid_folder, "elevation_density.csv"), check.names = TRUE)
+# Les données sont agrégées, créer un dt avec les données individuelles
+alt_exp_indiv <- rep(alt_exp$value, times = alt_exp$area)
+alt_exp_dt <- data.table(alt = alt_exp_indiv)
+
+# Statistiques descriptives
+alt_exp_stats <- alt_exp_dt[, .(
+  min    = min(alt),
+  median = median(alt),
+  mean   = mean(alt),
+  max    = max(alt),
+  sd     = sd(alt)
+)]
+alt_exp_stats |> data.table()
+
+# Visualisation
+ggplot(alt_exp_dt, aes(x = alt)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous() +
+  labs(title = "Distribution attendue de l'altitude",
+       x = "Altitude (m)") +
+  theme_minimal()
+ggplot(alt_exp_dt[alt > 0], aes(x = alt)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution attendue de l'altitude",
+       x = "Altitude (m) (log10)") +
+  theme_minimal()
+ggplot(alt_exp_dt, aes(x = alt)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_y_log10() +
+  labs(title = "Distribution attendue de l'altitude (axe Y en log10)",
+       x = "Altitude (m)", y = "Nombre de pixels (log10)") +
+  theme_minimal()
+```
+
+### Distribution observée
+
+```{r}
+# Calcul de l'altitude moyenne par session
+session_alt <- dat[, .(
+  elevation_m = mean(elevation_m, na.rm = TRUE)
+), by = id_session]
+
+# Statistiques descriptives
+alt_obs_stats <- session_alt[, .(
+  min    = min(elevation_m),
+  median = median(elevation_m),
+  mean   = mean(elevation_m),
+  max    = max(elevation_m),
+  sd     = sd(elevation_m)
+)]
+alt_obs_stats |> data.table()
+
+# Visualisation
+ggplot(session_alt, aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_x_continuous() + 
+  labs(title = "Altitude des sessions d'observation",
+       x = "Altitude (m)", y = "Nombre de sessions") +
+  theme_minimal()
+ggplot(session_alt[elevation_m > 0], aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "steelblue") +
+  scale_x_log10() +
+  labs(title = "Altitude des sessions d'observation (log10)",
+       x = "Altitude (m)", y = "Nombre de sessions") +
+  theme_minimal()
+ggplot(session_alt, aes(x = elevation_m)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  scale_y_log10() +
+  labs(title = "Altitude des sessions d'observation (axe Y en log10)",
+       x = "Altitude (m)", y = "Nombre de sessions (log10)") +
+  theme_minimal()
+```
+
+### Comparaison des distributions observée et attendue
+
+```{r}
+# Joindre les distributions obs et exp dans un format long
+alt_comp <- rbindlist(list(
+  data.table(source = "alt_exp", alt = alt_exp_indiv),
+  data.table(source = "alt_obs", alt = session_alt$elevation_m)
+))
+
+# Statistiques par groupe
+alt_comp[, .(
+  moyenne = mean(alt),
+  médiane = median(alt),
+  sd = sd(alt)
+), by = source]
+
+# Visualisation
+ggplot(alt_comp, aes(x = alt, fill = source)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous() +
+  labs(title = "Distribution de l'altitude",
+       x = "Altitude (m)", y = "Densité") +
+  theme_minimal()
+ggplot(alt_comp, aes(x = alt, fill = source)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(
+    trans = "log1p",
+    limits = c(0, NA),
+    breaks = c(0, 50, 200, 1000, 3000),
+    labels = scales::comma_format()
+  ) +
+  scale_fill_manual(
+    values = c("alt_obs" = "#00BFC4", "alt_exp" = "#F8766D"),
+    labels = c("alt_obs" = "Observée", "alt_exp" = "Attendue")
+  ) +
+  labs(
+    x = "Altitude (m, échelle log1p)",
+    y = "Densité estimée",
+    fill = "Distribution"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_blank())
+
+# Sauvegarder la figure log1p (sans titre)
+ggsave(file.path(fig_folder, "corrected_distribaltitude.png"), width = 8, height = 6, dpi = 300)
+```
+
+```{r}
+# Test de Kolmogorov-Smirnov
+ks.test(session_alt$elevation_m, alt_exp_indiv)
+# Comparaison visuelle des distributions cumulées
+ggplot(pop_comp, aes(x = pop, color = source)) +
+  stat_ecdf(geom = "step") +
+  labs(title = "Fonctions de répartition cumulées (ECDF)",
+       x = "Altitude (m)", y = "F(x)") + xlim(0,3000) +
+  theme_minimal()
+```
+
+Il y a une différence significative de taille modérée entre les distributions d'altitude observée et attendue (D = 0.13979, p < 2.2e-16).
+
+
+
+# Modélisation (GLM) : Régression de Poisson de type régression linéaire
+
+Nous allons maintenant étudier la relation entre la variable réponse "nses" (nombre de sessions d'observations) et les variables explicatives "popdensity_hab_per_km2" (densité moyenne de population), "elevation_m" (altitude moyenne) et "main_clc" (classe d'utilisation du sol majoritaire).
+
+
+```{r}
+# Chargement des données
+grille_data <- readRDS(file.path(read_folder, "dat_aggregated_10000.rds"))
+```
+
+## Visualisation des relations
+
+```{r}
+# Densité de population vs nses
+ggplot(grille_data, aes(x = popdensity_hab_per_km2, y = nses)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relation entre densité de population et nombre de sessions d'observation",
+       x = "Densité de population (hab/km²)", y = "Nombre de sessions d'observation")
+ggplot(grille_data, aes(x = log10(popdensity_hab_per_km2), y = nses)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relation entre densité de population et nombre de sessions d'observation",
+       x = "log10(Densité de population)", y = "Nombre de sessions d'observation")
+# Altitude vs nses
+ggplot(grille_data, aes(x = elevation_m, y = nses)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  labs(title = "Relation entre altitude et nombre de sessions d'observation",
+       x = "Altitude moyenne (m)", y = "Nombre de sessions d'observation")
+ggplot(grille_data, aes(x = log10(elevation_m), y = nses)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  labs(title = "Relation entre altitude et nombre de sessions d'observation",
+       x = "log10(Altitude moyenne)", y = "Nombre de sessions d'observation")
+# nses selon la classe d'occupation du sol majoritaire
+ggplot(grille_data, aes(x = main_clc, y = nses)) +
+  geom_boxplot(fill = "orange") +
+  labs(title = "Nombre de sessions d'observation selon l'occupation du sol",
+       x = "Classe d'occupation du sol", y = "Nombre de sessions d'observation") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Convertir la variable catégorielle clc en facteur
+
+```{r}
+# Convertir en facteur
+grille_data$main_clc <- as.factor(grille_data$main_clc)
+# Définir la modalité de référence = CLC_aquatic
+grille_data$main_clc <- relevel(grille_data$main_clc, ref = "CLC_aquatic")
+levels(grille_data$main_clc)
+```
+
+On définit CLC_aquatic comme modalité de référence puisqu'on considère que c'est le milieu le plus propice aux odonates.
+
+## Ajustement du modèle de régression linéaire de Poisson
+
+```{r}
+mod.pois <- glm(nses ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = "poisson", data = grille_data)
+```
+
+## Evaluation des hypothèses de la régression de Poisson
+
+### 1 : Indépendance des réponses : les observations sont indépendantes, cette hypothèse est validée.
+
+### 2 : Distribution des réponses selon une loi de Poisson
+
+Pour vérifier cette hypothèse, on va comparer la distribution des valeurs observées de nobs avec leur distribution théorique selon la loi de Poisson de paramètre Lambda (estimé par la moyenne de nobs).
+
+```{r}
+# Moyenne des sessions de comptage observées
+mean(grille_data$nses)
+# Simulation d’une distribution de Poisson théorique
+set.seed(1234)
+theoretic_count <- rpois(n = nrow(grille_data), lambda = mean(grille_data$nses))
+tc_df <- data.frame(theoretic_count)
+# Comparaison visuelle des distributions
+ggplot(grille_data, aes(x = nses)) +
+  geom_bar(fill = "#1E90FF") +
+  geom_bar(data = tc_df, aes(x = theoretic_count), fill = "red", alpha = 0.5) +
+  theme_classic() +
+  labs(title = "Comparaison des distributions observée et théorique (Poisson)",
+       x = "Nombre de sessions d'observation (nses)",
+       y = "Fréquence") +
+  scale_x_continuous(limits = c(0, 1000)) +
+  theme(legend.position = "none")
+```
+
+On voit que les 2 distributions sont très différentes, nses ne suit pas une loi de Poisson de paramètre lambda = 84.5 On peut également voir une sur-représentation des valeurs zéro dans les comptages observés ; il est donc très probable qu’une surdispersion soit mise en évidence.
+
+### Evaluation de la surdispersion
+
+```{r}
+summary(mod.pois)
+summary(mod.pois)$deviance / summary(mod.pois)$df.residual
+```
+
+Le ratio residual deviance / ddl est égal à 121.1 Ce ratio est très largement supérieur à 1 et permet de mettre en évidence la présence d’une surdispersion massive. Le modèle de Poisson est fortement biaisé, il est donc nécessaire d’utiliser une autre structure d’erreur dans le modèle de régression.
+
+## Ajustement du modèle à une structure d'erreur différente
+
+### Structure d'erreur quasi-poisson
+
+```{r}
+mod.quasipois <- glm(nses ~ popdensity_hab_per_km2 + elevation_m + main_clc, family = quasipoisson, data = grille_data)
+summary(mod.quasipois)
+```
+
+Les estimateurs sont identiques à ceux du modèle de Poisson, les erreurs standards sont plus grandes, le paramètre de dispersion estimé a augmenté (de 1 à 233, il est énorme ça confirme une forte surdispersion), le modèle corrige les erreurs standards mais ne modifie pas les estimations.
+
+### Structure d'erreur binomiale négative
+
+```{r}
+mod.nb <- glm.nb(nses ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = grille_data)
+summary(mod.nb)
+summary(mod.nb)$deviance / summary(mod.nb)$df.residual
+```
+
+L'indice theta = 0.7911 confirme encore une fois une forte surdispersion. Le modèle donne des estimations légèrement différentes, il fournit un AIC (permet une éventuelle comparaison plus tard) et il gère mieux la surdispersion (paramètre de dispersion proche de 1 : 1.173921). On retient ce modèle pour l'interprétation des résultats.
+
+## Vérification de la qualité de l'ajustement
+
+```{r}
+# Diagnostics de résidus
+simu_res <- simulateResiduals(fittedModel = mod.nb,n = 1000, plot = TRUE)
+# Test de surdisperion résiduelle
+testDispersion(simu_res)
+# Test d'inflation de zéros 
+testOutliers(simu_res, type = "bootstrap")
+```
+
+Certains tests du diagnostic DHARMa sont significatifs : KS test + moins de 1% de valeurs aberrantes (outliers at both margins = 52 / 5718 = 0.009 ; p \< 2.2e-16).
+
+La taille de l'échantillon augmente la sensibilité des tests, il vaut donc mieux se fier à l'interprétation visuelle. La distribution observée des résidus suit leur distribution attendue sans déviation majeure (QQ plot residuals), et il ne semble pas y avoir d’effet non-modélisé ou de non-linéarité claire (DHARMa residual vs. predicted).
+
+Pour approfondir l'étude de l'ajustement du modèle, on pourrait aussi réaliser un test d’autocorrélation spatiale, un test d’effets non linéaires manquants, un test de colinéarité des variables, etc.
+
+### Vérification de la colinéarité des variables explicatives
+
+```{r}
+mod_lm <- lm(nses ~ popdensity_hab_per_km2 + elevation_m + main_clc, data = grille_data)
+vif(mod_lm)
+cor(grille_data[, c("popdensity_hab_per_km2", "elevation_m")])
+```
+
+Il ne semble pas y avoir de colinéarité des variables.
+
+### Vérification de la présence de relations non linéaires dans le modèle
+
+```{r}
+# popdensity vs nses 
+ggplot(grille_data, aes(x = popdensity_hab_per_km2, y = nses)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", color = "blue") +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Relation non linéaire entre densité de population et nses",
+       x = "Densité de population (log1p)", y = "Nombre de sessions d'observation")
+# elevation vs nses
+ggplot(grille_data, aes(x = elevation_m, y = nses)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", color = "darkgreen") +
+  scale_x_continuous(trans = "log1p") +
+  labs(title = "Relation non linéaire entre altitude et nses",
+       x = "Altitude moyenne (log1p)", y = "Nombre de sessions d'observation")
+```
+
+Il ne semble pas non plus y avoir de forte non-linéarité évidente dans les relations univariées.
+
+Par soucis de temps, on ne va pas pousser la démarche d'ajustement du modèle plus loin. On pourrait tester des modèles ayant des structures d'erreur différentes (ZINB, zero-inflated, etc) ou tester des transformations de variables, le tout en comparant les différents modèles à l'aide des AIC pour affiner l'ajustement du modèle. On considère que le modèle binomial négatif est correctement ajusté pour cette analyse.
+
+## Interprétation des résultats du modèle binomial négatif
+
+```{r}
+# Pour interpréter les coefficients on ajuste l'échelle des variables explicatives
+grille_data$popdensity <- grille_data$popdensity_hab_per_km2 / 1000
+grille_data$elevation <- grille_data$elevation_m / 100
+mod.nb <- glm.nb(nses ~ popdensity + elevation + main_clc, data = grille_data)
+summary(mod.nb)
+summary(mod.nb)$deviance / summary(mod.nb)$df.residual
+```
+
+```{r}
+# Générer des figures propres des diagnostics DHARMa
+
+# Simuler les résidus
+simu_res <- simulateResiduals(fittedModel = mod.nb, n = 1000, plot = FALSE)
+
+# QQ plot sans messages rouges (ni KS, ni dispersion, ni outlier)
+png(file.path(fig_folder, "corrected_residus_QQ.png"), width = 1600, height = 1200, res = 300)
+plotQQunif(
+  simu_res,
+  main = "",
+  cex = 1.2,
+  testUniformity = FALSE,
+  testOutliers = FALSE,
+  testDispersion = FALSE
+)
+dev.off()
+
+# Résidus vs. valeurs prédites
+png(file.path(fig_folder, "corrected_residus_pred.png"), width = 1600, height = 1200, res = 300)
+plotResiduals(simu_res, form = simu_res$predictedResponse,
+              main = "", xlab = "Valeurs prédites", ylab = "Résidus simulés")
+dev.off()
+```

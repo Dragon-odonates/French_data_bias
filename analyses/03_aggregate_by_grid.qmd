@@ -38,6 +38,37 @@ dat <- dat[eventDate >= as.IDate("1990-01-01") & eventDate <= as.IDate("2018-12-
 summary(dat$eventDate)
 ```
 
+## Create session ID
+
+```{r}
+## Création d'un ID session ATLAS
+
+# Clean recordedBy
+dat[, recordedBy_clean := tolower(trimws(recordedBy))]
+dat[is.na(recordedBy_clean) | recordedBy_clean %in% c("anon", ""), recordedBy_clean := "unknown"]
+
+# 100 m buffer on coordinates
+dat[, `:=`(
+  x_round = round(x_ETRS89_LAEA, -2),
+  y_round = round(y_ETRS89_LAEA, -2)
+)]
+
+# Create atlas session ID
+dat[source == "atlas", id_ses_atlas := ifelse(
+  recordedBy_clean == "unknown",
+  paste(eventDate, x_round, y_round, sep = "_"),
+  paste(eventDate, recordedBy_clean, x_round, y_round, sep = "_")
+)]
+
+# Check sessions
+cat("Total number of atlas sessions created :", dat[source == "atlas", uniqueN(id_ses_atlas)], "\n")
+cat("Number of observations without id_ses_atlas :", dat[source == "atlas" & is.na(id_ses_atlas), .N], "\n")
+
+# Create column for session ID (atlas and steli)
+dat[, id_session := fifelse(source == "atlas", id_ses_atlas, id_ses)]
+dat <- dat[!is.na(id_session)]
+```
+
 ## Convert landcover groups
 
 ```{r}
@@ -108,7 +139,6 @@ dat[, bioclim_names := fcase(
 )]
 ```
 
-
 ```{r}
 # Pivot wider (column CLC names -> many columns)
 dat_wide <- dat |> 
@@ -165,6 +195,9 @@ dat_wide[, `:=`(elevation_m = mean(elevation_m,
 
 # Add number of obs
 dat_wide[, nobs := .N, by = grid_id]
+
+# Add number of sessions
+dat_wide[, nses := .(uniqueN(id_session)), by = grid_id]
 ```
 
 
@@ -174,6 +207,7 @@ dat_wide[, nobs := .N, by = grid_id]
 # Get columns we should keep
 cols_keep <- c(grid_id,
                "nobs",
+               "nses",
                clc_bioclim,
                "elevation_m",
                "popdensity_hab_per_km2")
